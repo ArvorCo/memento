@@ -1,0 +1,150 @@
+[vault]
+root = "~/vault"
+state_dir = "~/.memento/sync"
+
+[[markdown_sync.roots]]
+name = "workspace"
+source = "~/workspace"
+destination = "projects"
+include_extensions = [".md"]
+exclude_dirs = [
+  ".git",
+  "node_modules",
+  "Pods",
+  ".next",
+  ".turbo",
+  "__pycache__",
+  ".pytest_cache",
+  ".venv",
+  "venv",
+  "dist",
+  "build",
+  ".build",
+  "DerivedData",
+  ".playwright-mcp",
+  ".opencode",
+  ".amp",
+  ".codex",
+  ".factory",
+  ".claude",
+  ".gemini",
+]
+protected_globs = [
+  "**/_*_hub.md",
+  "**/MOC - *.md",
+  "**/*Hub*.md",
+  "**/* Hub.md",
+]
+
+[linking]
+enabled = true
+default_project_prefix = "projects"
+hub_filename = "_memento_hub.md"
+root_hub = "_memento.md"
+tag_hubs = true
+min_tag_documents = 2
+inject_navigation = true
+exclude_dirs = [".git", ".obsidian", ".trash"]
+
+[linking.project_aliases]
+memento = "projects/Memento/Memento"
+spider = "projects/Spider/Spider"
+
+[[document_import.sources]]
+name = "personal-documents"
+enabled = false
+source = "~/Documents"
+destination = "converted/documents"
+manifest = "documents-personal.json"
+include_extensions = [".pdf", ".doc", ".docx", ".odt", ".rtf", ".pptx", ".xlsx", ".html", ".csv", ".json", ".ipynb"]
+exclude_dirs = [".git", ".obsidian", "node_modules", ".venv", "venv"]
+preserve_raw = false
+delete_removed = true
+tags = ["documents", "imported"]
+max_file_bytes = 104857600
+
+[[database_import.sources]]
+name = "example-sqlite"
+enabled = false
+driver = "sqlite"
+database = "~/data/app.db"
+query = "SELECT id, title, body, updated_at FROM notes"
+destination = "databases/example"
+manifest = "database-example.json"
+id_column = "id"
+title_column = "title"
+content_columns = ["body"]
+metadata_columns = ["updated_at"]
+updated_at_column = "updated_at"
+tags = ["database", "notes"]
+delete_removed = true
+
+[session_import.codex]
+enabled = true
+source = "~/.codex/sessions"
+destination = "converted/codex"
+manifest = "codex_manifest.json"
+label = "Codex"
+source_tag = "codex"
+file_glob = "*.jsonl"
+
+[session_import.droid]
+enabled = true
+source = "~/.factory/sessions"
+destination = "converted/droid"
+manifest = "droid_manifest.json"
+label = "Droid"
+source_tag = "droid"
+file_glob = "*.jsonl"
+
+[session_import.claude]
+enabled = true
+source = "~/.claude/projects"
+destination = "converted/claude"
+manifest = "claude_manifest.json"
+label = "Claude"
+source_tag = "claude"
+file_glob = "*.jsonl"
+exclude_path_fragments = ["subagents"]
+
+[session_import.chatgpt]
+enabled = true
+source = "~/imports/chatgpt-export"
+destination = "converted/chatgpt"
+manifest = "chatgpt_manifest.json"
+label = "ChatGPT"
+source_tag = "chatgpt"
+file_glob = "conversations*.json"
+
+[icloud_sync]
+enabled = false
+root = "~/Library/Mobile Documents/com~apple~CloudDocs"
+
+[[icloud_sync.folders]]
+name = "documents"
+source = "Documents"
+raw_destination = "raw/icloud/documents"
+converted_destination = "converted/icloud/documents"
+include_markdown = true
+include_text = true
+convert_doc = true
+convert_docx = true
+convert_pptx = false
+convert_pdf = true
+
+[apple_notes]
+enabled = false
+destination = "converted/apple-notes"
+include_index = true
+
+[whatsapp_import]
+enabled = false
+source = "~/Downloads"
+destination = "whatsapp"
+manifest = "whatsapp_manifest.json"
+default_category = "outros"
+
+[[whatsapp_import.category_rules]]
+name = "work"
+destination = "work"
+matches = ["work", "team", "project"]

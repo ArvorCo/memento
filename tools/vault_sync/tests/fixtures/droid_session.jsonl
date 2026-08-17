@@ -1,0 +1,3 @@
+{"type":"session_start","timestamp":"2026-04-05T11:00:00Z","id":"sess-2","title":"Droid sync"}
+{"type":"message","timestamp":"2026-04-05T11:00:01Z","message":{"role":"user","content":[{"type":"text","text":"Current folder: /Users/test/workspace/memento\nPlease review sync-projects."}]}}
+{"type":"message","timestamp":"2026-04-05T11:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"The pipeline needs abstraction."}]}}

@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f5efe2;
+  --foreground: #15110f;
+  --muted: #6b5a4d;
+  --panel: rgba(255, 250, 242, 0.72);
+  --panel-strong: rgba(255, 248, 238, 0.88);
+  --line: rgba(46, 33, 25, 0.14);
+  --accent: #a34f2f;
+  --accent-soft: #e7c5a9;
+  --shadow: 0 30px 80px rgba(49, 28, 19, 0.12);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+html {
+  background:
+    radial-gradient(circle at top left, rgba(229, 190, 154, 0.65), transparent 34%),
+    radial-gradient(circle at top right, rgba(112, 142, 120, 0.18), transparent 26%),
+    linear-gradient(180deg, #f9f4ea 0%, #f2e8d8 40%, #efe4d2 100%);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), sans-serif;
+  min-height: 100vh;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.2;
+  background-image:
+    linear-gradient(rgba(34, 24, 18, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 24, 18, 0.03) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(circle at center, black 45%, transparent 92%);
+}
+
+::selection {
+  background: rgba(163, 79, 47, 0.18);
+}
+
+.font-display {
+  font-family: var(--font-display), serif;
+}
+
+.glass-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.ink-card {
+  background: linear-gradient(180deg, rgba(255, 252, 247, 0.92) 0%, rgba(248, 241, 229, 0.88) 100%);
+  border: 1px solid var(--line);
+  box-shadow: 0 20px 60px rgba(62, 39, 27, 0.08);
+}
+
+.signal-line {
+  position: relative;
+  overflow: hidden;
+}
+
+.signal-line::after {
+  content: "";
+  position: absolute;
+  inset: auto -20% 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(163, 79, 47, 0.8), transparent);
+  animation: sweep 5.4s linear infinite;
+}
+
+.fade-up {
+  animation: fadeUp 0.9s ease both;
+}
+
+.fade-up-delay {
+  animation: fadeUp 0.9s ease 0.15s both;
+}
+
+.fade-up-delay-2 {
+  animation: fadeUp 0.9s ease 0.3s both;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-35%);
+  }
+
+  to {
+    transform: translateX(35%);
+  }
+}

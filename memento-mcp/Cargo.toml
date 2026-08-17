@@ -1,0 +1,28 @@
+[package]
+name = "memento-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Token-efficient local MCP server for Memento memory"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[[bin]]
+name = "memento-mcp"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+dirs = "5"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+rmcp = { version = "3.1.2", features = ["client", "transport-io"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-std"] }
