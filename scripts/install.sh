@@ -377,7 +377,7 @@ install_program() {
     log "program installation skipped"
     return
   fi
-  if core_program_available; then
+  if [[ "$memento_program_method" == "auto" ]] && core_program_available; then
     log "Memento binaries already exist on PATH; preserving them"
     return
   fi

@@ -4,7 +4,11 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 async fn health_handler() -> Json<Value> {
-    Json(serde_json::json!({"status": "ok", "service": "memento-api", "version": "0.1.0"}))
+    Json(serde_json::json!({
+        "status": "ok",
+        "service": "memento-api",
+        "version": env!("CARGO_PKG_VERSION")
+    }))
 }
 
 #[tokio::test]

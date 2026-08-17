@@ -8,6 +8,7 @@ memento_test_fake_bin="$memento_test_temp/bin"
 memento_test_home="$memento_test_temp/home"
 memento_test_project="$memento_test_temp/project"
 memento_test_log="$memento_test_temp/commands.log"
+memento_release_test_log="$memento_test_temp/release-dry-run.log"
 
 cleanup() {
   rm -rf "$memento_test_temp"
@@ -68,6 +69,20 @@ test -f "$memento_test_project/.agents/skills/memento-runtime/SKILL.md"
 test -f "$memento_test_project/.claude/skills/memento-runtime/SKILL.md"
 if grep -F "mcp add" "$memento_test_log" >/dev/null; then
   printf 'CLI-only installation unexpectedly changed MCP configuration\n' >&2
+  exit 1
+fi
+
+"$memento_test_root/scripts/install.sh" \
+  --program release \
+  --version 0.1.0 \
+  --agent generic \
+  --integration cli \
+  --skip-init \
+  --dry-run >"$memento_release_test_log" 2>&1
+
+grep -F "would verify and install release 0.1.0" "$memento_release_test_log" >/dev/null
+if grep -F "binaries already exist on PATH; preserving them" "$memento_release_test_log" >/dev/null; then
+  printf 'Explicit release installation unexpectedly preserved PATH binaries\n' >&2
   exit 1
 fi
 
