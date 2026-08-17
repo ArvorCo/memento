@@ -17,7 +17,7 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -29,15 +29,19 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      - name: Rust security audit
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ github.token }}
 
   python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v10
       - name: Install Python deps
         run: uv sync --group dev
       - name: Ruff check
@@ -50,7 +54,7 @@ jobs:
   packaging:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate release scripts
         run: bash -n scripts/*.sh
       - name: Test agent installer
@@ -74,14 +78,16 @@ jobs:
       run:
         working-directory: memento-web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: memento-web/package-lock.json
       - name: Install web deps
         run: npm ci
+      - name: Security audit
+        run: npm audit --audit-level=low
       - name: Lint
         run: npm run lint
       - name: Build

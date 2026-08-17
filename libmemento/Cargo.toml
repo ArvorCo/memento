@@ -27,7 +27,7 @@ zstd = "0.13"
 
 # Async + caching
 tokio = { version = "1", features = ["full"] }
-lru = "0.12"
+lru = "0.18"
 
 # Utils
 thiserror = "1.0"
@@ -38,7 +38,7 @@ anyhow = "1"
 
 # Parsers
 walkdir = "2"
-pdf-extract = "0.7"
+pdf-extract = "0.12"
 regex = "1"
 
 [dev-dependencies]

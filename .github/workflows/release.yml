@@ -14,7 +14,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.value }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: version
         name: Validate release version
         shell: bash
@@ -47,7 +47,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -78,7 +78,7 @@ jobs:
         uses: actions/attest@v4
         with:
           subject-path: dist/*.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: memento-${{ matrix.target }}
           path: dist/*.tar.gz
@@ -90,8 +90,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: memento-*
           path: dist
@@ -100,7 +100,7 @@ jobs:
         shell: bash
         run: |
           cd dist
-          sha256sum *.tar.gz > SHA256SUMS
+          sha256sum -- *.tar.gz > SHA256SUMS
           cd ..
           version="${{ needs.validate.outputs.version }}"
           sha_macos_arm64="$(sha256sum "dist/memento-v${version}-aarch64-apple-darwin.tar.gz" | cut -d' ' -f1)"
