@@ -1,0 +1,148 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: Validate release version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cargo_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "memento-cli") | .version')"
+          if [[ "$version" != "$cargo_version" ]]; then
+            echo "tag version $version does not match Cargo version $cargo_version" >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Build core binaries
+        run: cargo build --release --locked --target ${{ matrix.target }} -p memento-cli -p mementod -p memento-mcp
+      - name: Package archive
+        shell: bash
+        run: |
+          version="${{ needs.validate.outputs.version }}"
+          archive="memento-v${version}-${{ matrix.target }}.tar.gz"
+          mkdir -p dist/package
+          cp "target/${{ matrix.target }}/release/memento" dist/package/
+          cp "target/${{ matrix.target }}/release/mementod" dist/package/
+          cp "target/${{ matrix.target }}/release/memento-mcp" dist/package/
+          mkdir -p dist/package/tools
+          cp tools/__init__.py dist/package/tools/
+          cp -R tools/vault_sync dist/package/tools/
+          mkdir -p dist/package/scripts
+          cp scripts/install.sh dist/package/scripts/
+          mkdir -p dist/package/.agents/skills
+          cp -R .agents/skills/memento-runtime dist/package/.agents/skills/
+          cp README.md AGENT_INSTALL.md LICENSE-MIT LICENSE-APACHE dist/package/
+          tar -C dist/package -czf "dist/${archive}" .
+      - name: Attest archive provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: memento-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [validate, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: memento-*
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums and Homebrew formula
+        shell: bash
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+          cd ..
+          version="${{ needs.validate.outputs.version }}"
+          sha_macos_arm64="$(sha256sum "dist/memento-v${version}-aarch64-apple-darwin.tar.gz" | cut -d' ' -f1)"
+          sha_macos_x86_64="$(sha256sum "dist/memento-v${version}-x86_64-apple-darwin.tar.gz" | cut -d' ' -f1)"
+          sha_linux_arm64="$(sha256sum "dist/memento-v${version}-aarch64-unknown-linux-gnu.tar.gz" | cut -d' ' -f1)"
+          sha_linux_x86_64="$(sha256sum "dist/memento-v${version}-x86_64-unknown-linux-gnu.tar.gz" | cut -d' ' -f1)"
+          scripts/render-homebrew-formula.sh \
+            "$version" \
+            "$sha_macos_arm64" \
+            "$sha_macos_x86_64" \
+            "$sha_linux_arm64" \
+            "$sha_linux_x86_64" > dist/memento.rb
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/*.tar.gz \
+            dist/SHA256SUMS \
+            dist/memento.rb \
+            --verify-tag \
+            --generate-notes \
+            --title "Memento ${{ needs.validate.outputs.version }}"
+      - name: Update optional Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          if [[ -z "$HOMEBREW_TAP_TOKEN" ]]; then
+            echo "HOMEBREW_TAP_TOKEN is not configured; formula remains attached to the release."
+            exit 0
+          fi
+          export GH_TOKEN="$HOMEBREW_TAP_TOKEN"
+          content="$(base64 -w0 < dist/memento.rb)"
+          current_sha="$(gh api repos/ArvorCo/homebrew-tap/contents/Formula/memento.rb --jq .sha 2>/dev/null || true)"
+          args=(
+            repos/ArvorCo/homebrew-tap/contents/Formula/memento.rb
+            --method PUT
+            -f "message=memento ${{ needs.validate.outputs.version }}"
+            -f "content=$content"
+          )
+          if [[ -n "$current_sha" ]]; then
+            args+=(-f "sha=$current_sha")
+          fi
+          gh api "${args[@]}"

@@ -1,0 +1,27 @@
+{
+  "id": "conv-1",
+  "title": "Simple Chat",
+  "create_time": 1775380000.0,
+  "update_time": 1775380001.0,
+  "current_node": "node-2",
+  "mapping": {
+    "node-1": {
+      "id": "node-1",
+      "message": {
+        "author": {"role": "user"},
+        "content": {"parts": ["hello"]}
+      },
+      "parent": null,
+      "children": ["node-2"]
+    },
+    "node-2": {
+      "id": "node-2",
+      "message": {
+        "author": {"role": "assistant"},
+        "content": {"parts": ["world"]}
+      },
+      "parent": "node-1",
+      "children": []
+    }
+  }
+}

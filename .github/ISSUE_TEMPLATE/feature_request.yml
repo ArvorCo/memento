@@ -1,0 +1,31 @@
+name: Feature request
+description: Propose a focused improvement to local memory, retrieval, or operations.
+title: "[feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What real workflow or retrieval failure should Memento solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful behavior, not only an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: measurement
+    attributes:
+      label: How should success be measured?
+      description: For retrieval work, include a suggested quality or latency test.
+  - type: checkboxes
+    id: architecture
+    attributes:
+      label: Local-first fit
+      options:
+        - label: This does not require a hosted service for core ingest, learn, or query.

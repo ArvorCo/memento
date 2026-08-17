@@ -1,0 +1,63 @@
+class Memento < Formula
+  desc "CPU-first local memory engine for humans and AI agents"
+  homepage "https://github.com/ArvorCo/memento"
+  version "@VERSION@"
+  license any_of: ["MIT", "Apache-2.0"]
+
+  depends_on "python@3.12"
+  depends_on "pandoc" => :recommended
+  depends_on "poppler" => :recommended
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/ArvorCo/memento/releases/download/v@VERSION@/memento-v@VERSION@-aarch64-apple-darwin.tar.gz"
+      sha256 "@SHA_MACOS_ARM64@"
+    else
+      url "https://github.com/ArvorCo/memento/releases/download/v@VERSION@/memento-v@VERSION@-x86_64-apple-darwin.tar.gz"
+      sha256 "@SHA_MACOS_X86_64@"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "https://github.com/ArvorCo/memento/releases/download/v@VERSION@/memento-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz"
+      sha256 "@SHA_LINUX_ARM64@"
+    else
+      url "https://github.com/ArvorCo/memento/releases/download/v@VERSION@/memento-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz"
+      sha256 "@SHA_LINUX_X86_64@"
+    end
+  end
+
+  def install
+    bin.install "memento", "mementod", "memento-mcp"
+    libexec.install "tools"
+    (libexec/"memento").install "scripts/install.sh"
+    (share/"memento/skills").install ".agents/skills/memento-runtime"
+    (bin/"memento-vault-sync").write <<~SH
+      #!/bin/bash
+      export PYTHONPATH="#{libexec}${PYTHONPATH:+:$PYTHONPATH}"
+      exec "#{formula_opt_bin("python@3.12")}/python3.12" -m tools.vault_sync.cli "$@"
+    SH
+    (bin/"memento-agent-install").write <<~SH
+      #!/bin/bash
+      export MEMENTO_SKILL_SOURCE="#{share}/memento/skills/memento-runtime"
+      exec "#{libexec}/memento/install.sh" --program skip "$@"
+    SH
+  end
+
+  service do
+    run [opt_bin/"mementod", "--foreground"]
+    keep_alive true
+    process_type :background
+    log_path var/"log/mementod.log"
+    error_log_path var/"log/mementod.log"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/memento --version")
+    assert_match version.to_s, shell_output("#{bin}/mementod --version")
+    assert_match version.to_s, shell_output("#{bin}/memento-mcp --version")
+    assert_match "Generic vault sync toolkit", shell_output("#{bin}/memento-vault-sync --help")
+    assert_match "Install Memento", shell_output("#{bin}/memento-agent-install --help")
+  end
+end

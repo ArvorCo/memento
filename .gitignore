@@ -1,0 +1,46 @@
+# OS noise
+.DS_Store
+
+# Editors
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Local environment
+.env
+.env.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+secrets.*
+
+# Rust
+/target
+
+# Node / web
+node_modules/
+.next/
+coverage/
+
+# Python
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+*.pyc
+*.pyo
+*.pyd
+tools/**/__pycache__/
+
+# Local runtime data
+.memento/
+*.log
+*.tmp
+research/
+tools/sync/out/

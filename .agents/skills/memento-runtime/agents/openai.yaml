@@ -1,0 +1,4 @@
+interface:
+  display_name: "Memento Runtime"
+  short_description: "Install and operate local AI memory"
+  default_prompt: "Use $memento-runtime to install or operate Memento and connect this agent through the safest available local interface."
