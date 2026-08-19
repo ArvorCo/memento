@@ -55,7 +55,7 @@ pub fn discover_documents(root: &Path) -> Result<Vec<DiscoveredDocument>> {
         });
     }
 
-    documents.sort_by(|left, right| normalized_path(&left.path).cmp(&normalized_path(&right.path)));
+    documents.sort_by_key(|document| normalized_path(&document.path));
     Ok(documents)
 }
 
