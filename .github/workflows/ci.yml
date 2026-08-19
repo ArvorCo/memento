@@ -57,6 +57,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test workspace
         run: cargo test --workspace
+      - name: Build native binaries
+        run: cargo build --locked -p memento-cli -p mementod -p memento-mcp
       - name: Test native PowerShell installer
         shell: powershell
         run: scripts/test-install.ps1
