@@ -48,14 +48,17 @@ pub fn with_http_auth(app: Router, token: Arc<str>) -> Router {
     }))
 }
 
+#[cfg(unix)]
 pub fn prepare_local_endpoint(data_dir: &Path) -> anyhow::Result<()> {
-    #[cfg(unix)]
-    {
-        let path = memento_ipc::unix_socket_path(data_dir);
-        if path.exists() {
-            std::fs::remove_file(path)?;
-        }
+    let path = memento_ipc::unix_socket_path(data_dir);
+    if path.exists() {
+        std::fs::remove_file(path)?;
     }
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn prepare_local_endpoint(_data_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
