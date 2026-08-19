@@ -1,7 +1,7 @@
 # Local HTTP API Reference
 
 > An opt-in authenticated transport for local integrations that cannot use the
-> CLI, Unix socket client, or MCP.
+> CLI, platform-local IPC client, or MCP.
 
 [← Documentation](README.md) · [Configuration](CONFIGURATION.md#optional-http-api) ·
 [Architecture](ARCHITECTURE.md#transport-and-trust-boundaries) ·
@@ -15,7 +15,7 @@ Use the interface that grants the least authority:
 | --- | --- |
 | Human operator | `memento` CLI |
 | Local AI agent | `memento-mcp` over `stdio` |
-| Local program needing stable JSON | CLI JSON/compact output or Unix socket |
+| Local program needing stable JSON | CLI JSON/compact output or platform-local IPC |
 | Program that specifically requires TCP HTTP | Optional HTTP listener |
 
 The HTTP router exposes every daemon mutation route. It is broader than the
@@ -27,8 +27,8 @@ bounded MCP tool surface and should remain loopback-only in normal operation.
 mementod --foreground --http-port 8765
 ```
 
-The Unix socket remains active. HTTP defaults to `127.0.0.1`. On first start,
-the daemon creates:
+The Unix socket or Windows named pipe remains active. HTTP defaults to
+`127.0.0.1`. On first start, the daemon creates:
 
 ```text
 ~/.memento/config/http_auth_token

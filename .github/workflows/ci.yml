@@ -37,6 +37,75 @@ jobs:
         with:
           token: ${{ github.token }}
 
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tools/vault_sync/requirements.txt
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-x86_64
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test workspace
+        run: cargo test --workspace
+      - name: Test native PowerShell installer
+        shell: powershell
+        run: scripts/test-install.ps1
+      - name: Test named-pipe runtime
+        shell: powershell
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP "memento-runtime"
+          $vault = Join-Path $env:RUNNER_TEMP "memento-vault"
+          New-Item -ItemType Directory -Force -Path $runtime, $vault | Out-Null
+          Set-Content -LiteralPath (Join-Path $vault "windows.md") -Value "# Windows`nMemento named pipe integration proof."
+          $env:MEMENTO_DATA_DIR = $runtime
+          Push-Location $env:RUNNER_TEMP
+          try {
+            & "$env:GITHUB_WORKSPACE\target\debug\memento.exe" init --preset windows --vault-root $vault
+            & "$env:GITHUB_WORKSPACE\target\debug\memento.exe" sync obsidian $vault --json
+            $result = & "$env:GITHUB_WORKSPACE\target\debug\memento.exe" query "named pipe integration proof" --output compact
+            if ($LASTEXITCODE -ne 0 -or $result -notmatch "windows.md") { throw "Windows query smoke test failed" }
+            $clients = 1..16 | ForEach-Object {
+              Start-Process `
+                -FilePath "$env:GITHUB_WORKSPACE\target\debug\memento.exe" `
+                -ArgumentList "status", "--json" `
+                -PassThru `
+                -WindowStyle Hidden
+            }
+            $clients | Wait-Process
+            foreach ($client in $clients) {
+              if ($client.ExitCode -ne 0) { throw "concurrent named-pipe client failed with $($client.ExitCode)" }
+            }
+          } finally {
+            Pop-Location
+            $pidPath = Join-Path $runtime "mementod.pid"
+            if (Test-Path $pidPath) { Stop-Process -Id ([int](Get-Content $pidPath)) -Force -ErrorAction SilentlyContinue }
+          }
+
+  python-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v10.0.1
+      - name: Install Python deps
+        run: uv sync --group dev
+      - name: Ruff check
+        run: uv run ruff check tools
+      - name: Python tests
+        run: uv run python -m unittest discover -s tools/vault_sync/tests -v
+
   python:
     runs-on: ubuntu-latest
     steps:

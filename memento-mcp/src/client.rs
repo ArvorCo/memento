@@ -7,11 +7,18 @@ use hyper::Request;
 use hyper_util::rt::TokioIo;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::NamedPipeClient;
+#[cfg(unix)]
 use tokio::net::UnixStream;
 
 #[derive(Debug, Clone)]
 pub struct DaemonClient {
+    #[cfg(unix)]
     socket_path: PathBuf,
+    #[cfg(windows)]
+    pipe_name: String,
 }
 
 impl DaemonClient {
@@ -20,10 +27,19 @@ impl DaemonClient {
             .map(PathBuf::from)
             .or_else(|| dirs::home_dir().map(|home| home.join(".memento")))
             .unwrap_or_else(|| PathBuf::from(".memento"));
-        let socket_path = std::env::var_os("MEMENTO_SOCKET")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| data_dir.join("memento.sock"));
-        Self { socket_path }
+        #[cfg(unix)]
+        {
+            let socket_path = std::env::var_os("MEMENTO_SOCKET")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| memento_ipc::unix_socket_path(&data_dir));
+            Self { socket_path }
+        }
+
+        #[cfg(windows)]
+        {
+            let pipe_name = memento_ipc::windows_pipe_name(&data_dir);
+            Self { pipe_name }
+        }
     }
 
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -40,14 +56,7 @@ impl DaemonClient {
         path: &str,
         body: Option<&B>,
     ) -> Result<T> {
-        let stream = UnixStream::connect(&self.socket_path)
-            .await
-            .with_context(|| {
-                format!(
-                    "cannot reach mementod at {}; start the daemon with `mementod --foreground`",
-                    self.socket_path.display()
-                )
-            })?;
+        let stream = self.connect_stream().await?;
         let io = TokioIo::new(stream);
         let (mut sender, connection) = hyper::client::conn::http1::handshake(io)
             .await
@@ -77,5 +86,29 @@ impl DaemonClient {
             anyhow::bail!("mementod returned HTTP {status}: {detail}");
         }
         serde_json::from_slice(&payload).context("mementod returned invalid JSON")
+    }
+
+    #[cfg(unix)]
+    async fn connect_stream(&self) -> Result<UnixStream> {
+        UnixStream::connect(&self.socket_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "cannot reach mementod at {}; start the daemon with `mementod --foreground`",
+                    self.socket_path.display()
+                )
+            })
+    }
+
+    #[cfg(windows)]
+    async fn connect_stream(&self) -> Result<NamedPipeClient> {
+        memento_ipc::connect_windows_pipe(&self.pipe_name)
+            .await
+            .with_context(|| {
+                format!(
+                    "cannot reach mementod at {}; start the daemon with `mementod --foreground`",
+                    self.pipe_name
+                )
+            })
     }
 }

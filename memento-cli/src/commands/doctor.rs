@@ -147,6 +147,30 @@ fn check_daemon_config(config: &DaemonConfigFile) -> Vec<CheckResult> {
                 &memento_config::expand_user_path(socket_path),
             ));
         }
+        if let Some(pipe_name) = runtime.pipe_name.as_deref() {
+            if pipe_name.starts_with(r"\\.\pipe\memento-") {
+                checks.push(CheckResult::pass(
+                    "daemon named pipe",
+                    pipe_name.to_string(),
+                ));
+            } else {
+                checks.push(CheckResult::fail(
+                    "daemon named pipe",
+                    format!("invalid local pipe name `{pipe_name}`"),
+                ));
+            }
+        }
+        if let Some(transport) = runtime.transport.as_deref() {
+            let expected = if cfg!(windows) { "named_pipe" } else { "unix" };
+            if transport == expected {
+                checks.push(CheckResult::pass("daemon transport", transport.to_string()));
+            } else {
+                checks.push(CheckResult::warn(
+                    "daemon transport",
+                    format!("configured `{transport}`, current platform expects `{expected}`"),
+                ));
+            }
+        }
     }
 
     if let Some(vault) = config.vault.as_ref() {
@@ -502,12 +526,12 @@ async fn check_runtime() -> Vec<CheckResult> {
             checks.push(CheckResult::pass("daemon health", "mementod is reachable"));
         }
         Err(err) => {
-            if client::socket_path().exists() {
+            if client::endpoint_exists() {
                 checks.push(CheckResult::warn(
-                    "daemon socket",
+                    "daemon endpoint",
                     format!(
-                        "socket exists at {} but health probe failed: {err}",
-                        client::socket_path().display()
+                        "endpoint exists at {} but health probe failed: {err}",
+                        client::endpoint_description()
                     ),
                 ));
             } else {

@@ -61,6 +61,9 @@ def conversion_capabilities() -> dict[str, bool]:
         "pandoc": shutil.which("pandoc") is not None,
         "pdftotext": shutil.which("pdftotext") is not None,
         "pdf_python_fallback": importlib.util.find_spec("pypdf") is not None,
+        "docx_python": importlib.util.find_spec("docx") is not None,
+        "pptx_python": importlib.util.find_spec("pptx") is not None,
+        "xlsx_python": importlib.util.find_spec("openpyxl") is not None,
         "pdf_ocr": shutil.which("pdftoppm") is not None and shutil.which("tesseract") is not None,
         "legacy_office": shutil.which("libreoffice") is not None or shutil.which("textutil") is not None,
     }
@@ -78,6 +81,14 @@ def convert_document(path: Path) -> ConversionResult:
         return _convert_json(path)
     if suffix == ".doc":
         return _convert_legacy_doc(path)
+    if suffix == ".docx" and importlib.util.find_spec("docx") is not None:
+        return _convert_docx(path)
+    if suffix == ".pptx" and importlib.util.find_spec("pptx") is not None:
+        return _convert_pptx(path)
+    if suffix == ".xlsx" and importlib.util.find_spec("openpyxl") is not None:
+        return _convert_xlsx(path)
+    if suffix == ".ipynb":
+        return _convert_notebook(path)
     if suffix in PANDOC_EXTENSIONS:
         return _convert_with_pandoc(path)
     raise ConversionError(f"unsupported document type: {suffix or '<none>'}")
@@ -271,6 +282,118 @@ def _convert_delimited(path: Path, delimiter: str) -> ConversionResult:
     return ConversionResult(normalize_markdown("\n".join(lines)), "python-csv", path.suffix.lstrip("."))
 
 
+def _convert_docx(path: Path) -> ConversionResult:
+    from docx import Document
+
+    document = Document(path)
+    parts: list[str] = []
+    for paragraph in document.paragraphs:
+        text = paragraph.text.strip()
+        if not text:
+            continue
+        style = ((paragraph.style.name if paragraph.style else "") or "").lower()
+        if style.startswith("heading"):
+            match = re.search(r"(\d+)", style)
+            level = min(int(match.group(1)), 6) if match else 2
+            parts.append(f"{'#' * level} {text}")
+        else:
+            parts.append(text)
+    for table in document.tables:
+        rows = [[cell.text for cell in row.cells] for row in table.rows]
+        rendered = _render_table(rows)
+        if rendered:
+            parts.append("\n".join(rendered))
+    if not parts:
+        raise ConversionError(f"{path.name} contains no extractable text")
+    return ConversionResult(normalize_markdown("\n\n".join(parts)), "python-docx", "docx")
+
+
+def _convert_pptx(path: Path) -> ConversionResult:
+    from pptx import Presentation
+
+    presentation = Presentation(path)
+    parts: list[str] = []
+    for slide_number, slide in enumerate(presentation.slides, start=1):
+        slide_parts = [f"## Slide {slide_number}"]
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                text = "\n".join(
+                    paragraph.text.strip() for paragraph in shape.text_frame.paragraphs if paragraph.text.strip()
+                )
+                if text:
+                    slide_parts.append(text)
+            if getattr(shape, "has_table", False):
+                rows = [[cell.text for cell in row.cells] for row in shape.table.rows]
+                rendered = _render_table(rows)
+                if rendered:
+                    slide_parts.append("\n".join(rendered))
+        if len(slide_parts) > 1:
+            parts.append("\n\n".join(slide_parts))
+    if not parts:
+        raise ConversionError(f"{path.name} contains no extractable text")
+    return ConversionResult(normalize_markdown("\n\n".join(parts)), "python-pptx", "pptx")
+
+
+def _convert_xlsx(path: Path) -> ConversionResult:
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    parts: list[str] = []
+    warnings: list[str] = []
+    max_rows = 10_000
+    max_columns = 256
+    try:
+        for worksheet in workbook.worksheets:
+            rows: list[list[str]] = []
+            if worksheet.max_column > max_columns:
+                warnings.append(f"sheet {worksheet.title}: truncated after {max_columns} columns")
+            for row_number, row in enumerate(
+                worksheet.iter_rows(max_row=max_rows + 1, max_col=max_columns, values_only=True), start=1
+            ):
+                if row_number > max_rows:
+                    warnings.append(f"sheet {worksheet.title}: truncated after {max_rows} rows")
+                    break
+                values = ["" if value is None else str(value) for value in row[:max_columns]]
+                while values and not values[-1]:
+                    values.pop()
+                if values:
+                    rows.append(values)
+            if rows:
+                parts.append(f"## Sheet: {worksheet.title}\n\n" + "\n".join(_render_table(rows)))
+    finally:
+        workbook.close()
+    if not parts:
+        raise ConversionError(f"{path.name} contains no extractable cells")
+    return ConversionResult(normalize_markdown("\n\n".join(parts)), "openpyxl", "xlsx", warnings)
+
+
+def _convert_notebook(path: Path) -> ConversionResult:
+    notebook = json.loads(path.read_text(encoding="utf-8-sig"))
+    parts: list[str] = []
+    for cell in notebook.get("cells", []):
+        source = "".join(cell.get("source", [])).strip()
+        if not source:
+            continue
+        if cell.get("cell_type") == "code":
+            parts.append(f"```python\n{source}\n```")
+        else:
+            parts.append(source)
+    if not parts:
+        raise ConversionError(f"{path.name} contains no readable cells")
+    return ConversionResult(normalize_markdown("\n\n".join(parts)), "python-json", "ipynb")
+
+
+def _render_table(rows: list[list[object]]) -> list[str]:
+    if not rows:
+        return []
+    string_rows = [["" if value is None else str(value) for value in row] for row in rows]
+    width = max(len(row) for row in string_rows)
+    header = _pad_row(string_rows[0], width)
+    lines = [_markdown_row(header), _markdown_row(["---"] * width)]
+    lines.extend(_markdown_row(_pad_row(row, width)) for row in string_rows[1:])
+    return lines
+
+
 def _pad_row(row: list[str], width: int) -> list[str]:
     return row + [""] * (width - len(row))
 
@@ -312,4 +435,3 @@ def _html_fallback(content: str) -> str:
     parser = _TextHTMLParser()
     parser.feed(content)
     return normalize_markdown("".join(parser.parts))
-

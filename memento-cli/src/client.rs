@@ -1,4 +1,4 @@
-//! Client — connects to mementod via Unix socket
+//! Client — connects to mementod over the platform-local IPC transport.
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
@@ -6,6 +6,10 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::Request;
 use std::path::PathBuf;
+
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::NamedPipeClient;
+#[cfg(unix)]
 use tokio::net::UnixStream;
 
 use crate::config;
@@ -14,8 +18,23 @@ pub fn data_dir() -> PathBuf {
     config::data_dir()
 }
 
-pub fn socket_path() -> PathBuf {
-    data_dir().join("memento.sock")
+pub fn endpoint_description() -> String {
+    memento_ipc::endpoint_description(&data_dir())
+}
+
+pub fn endpoint_exists() -> bool {
+    #[cfg(unix)]
+    {
+        return memento_ipc::unix_socket_path(&data_dir()).exists();
+    }
+
+    #[cfg(windows)]
+    {
+        return daemon_process_is_alive();
+    }
+
+    #[allow(unreachable_code)]
+    false
 }
 
 pub fn start_daemon() -> Result<()> {
@@ -39,13 +58,29 @@ pub fn start_daemon() -> Result<()> {
             .context("Failed to start mementod via nohup shell launcher")?;
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        std::process::Command::new(exe)
+        use std::fs::OpenOptions;
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+        let stdout = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .with_context(|| format!("Failed to open daemon log {}", log_path.display()))?;
+        let stderr = stdout
+            .try_clone()
+            .context("Failed to clone daemon log handle")?;
+        let mut command = std::process::Command::new(exe);
+        command
             .arg("--foreground")
             .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stdout(stdout)
+            .stderr(stderr)
+            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
             .spawn()
             .context("Failed to start mementod")?;
     }
@@ -83,6 +118,10 @@ fn daemon_process_is_alive() -> bool {
 }
 
 fn process_is_alive(pid: i32) -> bool {
+    if pid <= 0 {
+        return false;
+    }
+
     #[cfg(unix)]
     unsafe {
         unsafe extern "C" {
@@ -92,8 +131,22 @@ fn process_is_alive(pid: i32) -> bool {
         kill(pid, 0) == 0
     }
 
-    #[cfg(not(unix))]
-    return false;
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+        if handle.is_null() {
+            return false;
+        }
+        let mut exit_code = 0_u32;
+        let result = GetExitCodeProcess(handle, &mut exit_code);
+        let _ = CloseHandle(handle);
+        result != 0 && exit_code == STILL_ACTIVE
+    }
 }
 
 pub async fn wait_for_daemon_ready(timeout: std::time::Duration) -> Result<()> {
@@ -120,7 +173,7 @@ fn which_mementod() -> Result<PathBuf> {
     // Try same directory as memento binary
     if let Ok(exe) = std::env::current_exe() {
         let dir = exe.parent().unwrap_or(std::path::Path::new("."));
-        let candidate = dir.join("mementod");
+        let candidate = dir.join(format!("mementod{}", std::env::consts::EXE_SUFFIX));
         if candidate.exists() {
             return Ok(candidate);
         }
@@ -134,11 +187,24 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-async fn connect() -> Result<hyper::client::conn::http1::SendRequest<Full<Bytes>>> {
-    let sock = socket_path();
-    let stream = UnixStream::connect(&sock)
+#[cfg(unix)]
+async fn connect_stream() -> Result<UnixStream> {
+    let socket = memento_ipc::unix_socket_path(&data_dir());
+    UnixStream::connect(&socket)
         .await
-        .with_context(|| format!("Cannot connect to mementod at {}", sock.display()))?;
+        .with_context(|| format!("Cannot connect to mementod at {}", socket.display()))
+}
+
+#[cfg(windows)]
+async fn connect_stream() -> Result<NamedPipeClient> {
+    let pipe = memento_ipc::windows_pipe_name(&data_dir());
+    memento_ipc::connect_windows_pipe(&pipe)
+        .await
+        .with_context(|| format!("Cannot connect to mementod at {pipe}"))
+}
+
+async fn connect() -> Result<hyper::client::conn::http1::SendRequest<Full<Bytes>>> {
+    let stream = connect_stream().await?;
 
     let io = hyper_util::rt::TokioIo::new(stream);
     let (sender, conn) = hyper::client::conn::http1::handshake(io)

@@ -31,3 +31,52 @@ class DocumentConverterTests(unittest.TestCase):
         self.assertNotIn("Quarterly Report", "\n".join(cleaned))
         self.assertIn("international results", cleaned[0])
 
+    def test_docx_conversion_uses_native_python_reader(self) -> None:
+        from docx import Document
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "plan.docx"
+            document = Document()
+            document.add_heading("Windows plan", level=1)
+            document.add_paragraph("Named pipes keep the runtime local.")
+            document.save(path)
+
+            result = convert_document(path)
+
+            self.assertEqual(result.converter, "python-docx")
+            self.assertIn("Windows plan", result.markdown)
+            self.assertIn("Named pipes", result.markdown)
+
+    def test_pptx_conversion_preserves_slide_text(self) -> None:
+        from pptx import Presentation
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "briefing.pptx"
+            presentation = Presentation()
+            slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+            slide.shapes.title.text = "Memento"
+            slide.placeholders[1].text = "Local Windows memory"
+            presentation.save(path)
+
+            result = convert_document(path)
+
+            self.assertEqual(result.converter, "python-pptx")
+            self.assertIn("Local Windows memory", result.markdown)
+
+    def test_xlsx_conversion_preserves_sheets_and_cells(self) -> None:
+        from openpyxl import Workbook
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "facts.xlsx"
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.title = "Decisions"
+            worksheet.append(["topic", "decision"])
+            worksheet.append(["transport", "named pipe"])
+            workbook.save(path)
+
+            result = convert_document(path)
+
+            self.assertEqual(result.converter, "openpyxl")
+            self.assertIn("## Sheet: Decisions", result.markdown)
+            self.assertIn("| transport | named pipe |", result.markdown)

@@ -72,6 +72,44 @@ cargo run -p mementod -- --version
 uv run python -m tools.vault_sync.cli --help
 ```
 
+### Windows
+
+If PowerShell blocks the reviewed installer, do not weaken the machine-wide
+policy. Run only that process with an explicit override:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+```
+
+If a new terminal cannot find Memento, inspect and repair the current-user
+`PATH`, then reopen the terminal:
+
+```powershell
+$bin = Join-Path $env:LOCALAPPDATA "Programs\Memento\bin"
+$env:Path -split ';'
+Get-Command "$bin\memento.exe"
+```
+
+For an unreachable daemon, confirm every process uses the same store and read
+the startup log:
+
+```powershell
+Get-ChildItem Env:MEMENTO_*
+memento doctor
+Get-Content "$HOME\.memento\mementod.log" -Tail 100
+mementod --foreground
+```
+
+Windows has no `memento.sock` file. The endpoint is a named pipe derived from
+the absolute `MEMENTO_DATA_DIR`; an intentional `MEMENTO_PIPE` override must be
+identical in daemon, CLI, and MCP environments. Do not delete the data directory
+to troubleshoot a pipe.
+
+If `memento-vault-sync.bat` is missing, rerun the installer with
+`-Program skip -Feeder always`. This installs an isolated Python 3.12
+environment, using WinGet only when Python is absent. Core Obsidian and folder
+sync remain available without the Python feeder.
+
 ### Version mismatch
 
 ```bash
@@ -270,8 +308,10 @@ OCR success does not guarantee table, equation, or handwriting accuracy.
 ### Office conversion fails
 
 `docx`, `pptx`, `xlsx`, and related binary formats belong in the document
-feeder, not direct import. Verify `pandoc --version`. Legacy `.doc` may also need
-LibreOffice or macOS `textutil`.
+feeder, not direct import. Current Office XML formats have native Python
+converters; inspect `memento-vault-sync ... capabilities` and confirm the feeder
+environment contains its packaged requirements. Pandoc is a fallback for
+additional formats. Legacy `.doc` may also need LibreOffice or macOS `textutil`.
 
 ### Database import fails
 

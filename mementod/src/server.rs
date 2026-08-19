@@ -1,4 +1,4 @@
-//! Server — Unix socket + optional HTTP listener
+//! Server — local Unix socket/Windows named pipe + optional HTTP listener.
 
 use crate::api;
 use crate::manager::MementoManager;
@@ -9,8 +9,33 @@ use axum::response::Response;
 use axum::Router;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::net::{TcpListener, UnixListener};
+use tokio::net::TcpListener;
 use tracing::info;
+
+#[cfg(windows)]
+use tracing::warn;
+
+#[cfg(unix)]
+use tokio::net::UnixListener;
+
+#[cfg(windows)]
+use hyper_util::rt::TokioIo;
+#[cfg(windows)]
+use hyper_util::service::TowerToHyperService;
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+
+#[cfg(unix)]
+pub struct LocalListener {
+    inner: UnixListener,
+    endpoint: String,
+}
+
+#[cfg(windows)]
+pub struct LocalListener {
+    inner: NamedPipeServer,
+    endpoint: String,
+}
 
 pub fn build_router(state: Arc<MementoManager>) -> Router {
     api::routes(state)
@@ -23,18 +48,67 @@ pub fn with_http_auth(app: Router, token: Arc<str>) -> Router {
     }))
 }
 
-pub fn bind_unix_socket(path: &Path) -> anyhow::Result<UnixListener> {
-    Ok(UnixListener::bind(path)?)
+pub fn prepare_local_endpoint(data_dir: &Path) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        let path = memento_ipc::unix_socket_path(data_dir);
+        if path.exists() {
+            std::fs::remove_file(path)?;
+        }
+    }
+    Ok(())
 }
 
-pub async fn serve_unix_socket(
-    app: Router,
-    listener: UnixListener,
-    path: &Path,
-) -> anyhow::Result<()> {
-    info!("Listening on Unix socket: {}", path.display());
-    axum::serve(listener, app).await?;
+#[cfg(unix)]
+pub fn bind_local(data_dir: &Path) -> anyhow::Result<LocalListener> {
+    let path = memento_ipc::unix_socket_path(data_dir);
+    Ok(LocalListener {
+        inner: UnixListener::bind(&path)?,
+        endpoint: path.display().to_string(),
+    })
+}
+
+#[cfg(windows)]
+pub fn bind_local(data_dir: &Path) -> anyhow::Result<LocalListener> {
+    let endpoint = memento_ipc::windows_pipe_name(data_dir);
+    let inner = pipe_server(&endpoint, true)?;
+    Ok(LocalListener { inner, endpoint })
+}
+
+#[cfg(windows)]
+fn pipe_server(endpoint: &str, first: bool) -> std::io::Result<NamedPipeServer> {
+    let mut options = ServerOptions::new();
+    options
+        .first_pipe_instance(first)
+        .reject_remote_clients(true);
+    options.create(endpoint)
+}
+
+#[cfg(unix)]
+pub async fn serve_local(app: Router, listener: LocalListener) -> anyhow::Result<()> {
+    info!("Listening on Unix socket: {}", listener.endpoint);
+    axum::serve(listener.inner, app).await?;
     Ok(())
+}
+
+#[cfg(windows)]
+pub async fn serve_local(app: Router, mut listener: LocalListener) -> anyhow::Result<()> {
+    info!("Listening on Windows named pipe: {}", listener.endpoint);
+    loop {
+        listener.inner.connect().await?;
+        let connected = listener.inner;
+        listener.inner = pipe_server(&listener.endpoint, false)?;
+        let service = TowerToHyperService::new(app.clone());
+        tokio::spawn(async move {
+            let io = TokioIo::new(connected);
+            if let Err(error) = hyper::server::conn::http1::Builder::new()
+                .serve_connection(io, service)
+                .await
+            {
+                warn!("Named pipe connection error: {error}");
+            }
+        });
+    }
 }
 
 pub async fn bind_http(host: &str, port: u16) -> anyhow::Result<TcpListener> {

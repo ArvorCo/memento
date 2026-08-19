@@ -191,7 +191,7 @@ fixture is easier to reason about and safe to attach to a bug report.
 | Daemon runtime/retrieval tests | `mementod/src/manager/tests*.rs` |
 | MCP tool/schema tests | `memento-mcp/src/` test modules |
 | Feeder tests | `tools/vault_sync/tests/` |
-| Agent installer tests | `scripts/test-install.sh` |
+| Agent installer tests | `scripts/test-install.sh`, `scripts/test-install.ps1` |
 | Web checks | `memento-web` lint/build |
 
 Prefer the smallest test that proves the behavior. Add an end-to-end test when

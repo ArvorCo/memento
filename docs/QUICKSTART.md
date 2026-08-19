@@ -24,9 +24,9 @@ flowchart LR
 
 ## Prerequisites
 
-- macOS or Linux on arm64 or x86_64
+- macOS, Linux, or Windows on arm64 or x86_64
 - an existing directory of Markdown notes, ideally an Obsidian vault
-- Homebrew for the shortest installation path
+- Homebrew on macOS, or PowerShell 5.1+ on Windows
 
 No GPU, embedding key, hosted database, or LLM API key is required.
 
@@ -41,6 +41,17 @@ For a manual installation:
 ```bash
 brew install ArvorCo/tap/memento
 ```
+
+Windows PowerShell:
+
+```powershell
+git clone --depth 1 https://github.com/ArvorCo/memento.git
+Set-Location memento
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+```
+
+Linux users without Homebrew can use the verified release installer described
+in the [installation guide](INSTALLATION.md).
 
 Confirm all packaged interfaces are present:
 
@@ -69,7 +80,8 @@ Or let Memento create `~/MementoVault`:
 memento init
 ```
 
-Initialization creates:
+Initialization creates the following default layout (`%USERPROFILE%\.memento`
+on Windows):
 
 ```text
 ~/.memento/
@@ -77,7 +89,8 @@ Initialization creates:
 │   ├── daemon.toml       daemon, vault, and scheduler settings
 │   └── vault_sync.toml   feeder sources and vault maintenance
 ├── sync/                 feeder manifests and incremental state
-└── memento.sock          local daemon socket while running
+├── mementod.pid          daemon process identity while running
+└── memento.sock          Unix only; Windows uses a local named pipe
 ```
 
 It also detects common local session stores and attempts to start `mementod`.

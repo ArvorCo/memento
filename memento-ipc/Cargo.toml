@@ -1,0 +1,17 @@
+[package]
+name = "memento-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Cross-platform local IPC endpoint naming for Memento"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[target.'cfg(windows)'.dependencies]
+tokio = { version = "1", features = ["net", "time"] }

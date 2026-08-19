@@ -1092,7 +1092,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libmemento"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "approx 0.5.1",
@@ -1227,7 +1227,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "memento-api"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1245,7 +1245,7 @@ dependencies = [
 
 [[package]]
 name = "memento-cli"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1256,17 +1256,26 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "memento-ipc",
  "predicates",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "toml",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "memento-ipc"
+version = "0.2.0"
+dependencies = [
+ "tokio",
 ]
 
 [[package]]
 name = "memento-mcp"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1274,6 +1283,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "memento-ipc",
  "rmcp",
  "schemars",
  "serde",
@@ -1283,7 +1293,7 @@ dependencies = [
 
 [[package]]
 name = "memento-research"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1301,7 +1311,7 @@ dependencies = [
 
 [[package]]
 name = "mementod"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1312,6 +1322,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "libmemento",
+ "memento-ipc",
  "rayon",
  "serde",
  "serde_json",

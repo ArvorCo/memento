@@ -75,6 +75,12 @@ die() {
   exit 1
 }
 
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    die "Windows uses the native PowerShell installer: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1"
+    ;;
+esac
+
 command_exists() {
   command -v "$1" >/dev/null 2>&1
 }

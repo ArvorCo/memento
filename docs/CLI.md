@@ -254,9 +254,10 @@ Options:
   -f, --foreground         Keep the process attached
 ```
 
-The Unix socket is always created. HTTP is additional and opt-in. A non-loopback
-host is rejected unless `--allow-remote-http` is explicit; every HTTP route
-except `/health` requires a bearer token.
+The platform-local endpoint is always created: a Unix socket on macOS/Linux or
+a named pipe on Windows. HTTP is additional and opt-in. A non-loopback host is
+rejected unless `--allow-remote-http` is explicit; every HTTP route except
+`/health` requires a bearer token.
 
 ```bash
 mementod --foreground
@@ -325,7 +326,8 @@ each stage.
 ## `memento-mcp`
 
 `memento-mcp` accepts no operational arguments. It speaks MCP over standard
-input/output and finds the daemon through `MEMENTO_DATA_DIR` or `MEMENTO_SOCKET`.
+input/output and finds the daemon through `MEMENTO_DATA_DIR`, `MEMENTO_SOCKET`
+on Unix, or `MEMENTO_PIPE` on Windows.
 
 ```bash
 memento-mcp --version
@@ -351,7 +353,8 @@ Keep the separator `--` between Cargo arguments and application arguments.
 | Variable | Used by | Purpose |
 | --- | --- | --- |
 | `MEMENTO_DATA_DIR` | CLI, daemon, MCP | Override the local store root |
-| `MEMENTO_SOCKET` | MCP | Override only the daemon socket path |
+| `MEMENTO_SOCKET` | MCP on Unix | Override only the daemon socket path |
+| `MEMENTO_PIPE` | CLI, daemon, MCP on Windows | Override the local named-pipe name |
 | `MEMENTO_HTTP_TOKEN` | Daemon | Supply HTTP bearer token instead of token file |
 | `MEMENTO_VAULT_SYNC_CONFIG` | Feeder | Select feeder TOML without `--config` |
 | `MEMENTO_REPO_ROOT` | Scheduler | Resolve a source-checkout feeder runner |

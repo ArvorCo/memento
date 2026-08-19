@@ -43,8 +43,8 @@ flowchart TB
     person --> cli
     person --> sources
     sources --> feeder --> vault
-    cli -->|Unix socket| daemon
-    agent -->|MCP stdio| mcp -->|Unix socket| daemon
+    cli -->|local IPC| daemon
+    agent -->|MCP stdio| mcp -->|local IPC| daemon
     vault --> daemon
     daemon <--> store
 ```
@@ -57,6 +57,7 @@ unless the operator explicitly adds the optional authenticated HTTP listener.
 | Component | Responsibility | Must not own |
 | --- | --- | --- |
 | `libmemento` | File format, chunking, parsers, matrix/learning primitives, runtime storage | Process lifecycle or product UI |
+| `memento-ipc` | Cross-platform private endpoint naming and Windows pipe connection behavior | Retrieval or storage policy |
 | `mementod` | Mutable engine state, persistence, retrieval pipeline, scheduler, local API | Cloud tenancy or arbitrary remote access |
 | `memento-cli` | Human operations, onboarding, diagnostics, output formats, daemon readiness | A second retrieval implementation |
 | `memento-mcp` | Bounded tool schemas and MCP/daemon translation | Direct vault reads or independent indexes |
@@ -143,11 +144,12 @@ own hubs and refusing to replace an unmarked file.
 - owns the in-memory lexical index, document graph, and learned signals
 - serializes state-changing operations
 - publishes durable segments before advancing the current manifest pointer
-- exposes the same routes over a Unix socket and optional HTTP
+- exposes the same routes over platform-local IPC and optional HTTP
 
 The CLI probes readiness rather than relying on a blind sleep. The daemon writes
-a PID during startup, removes stale socket state before binding, and cleans PID
-and socket files on normal shutdown.
+a PID during startup. Unix removes stale socket state before binding and cleans
+the socket file on normal shutdown; Windows uses a named pipe whose first server
+instance also enforces one daemon per store.
 
 ## Storage layout
 
@@ -176,7 +178,7 @@ One store is rooted at `MEMENTO_DATA_DIR` or `~/.memento`:
 ├── caches/                       rebuildable data
 ├── snapshots/                    snapshot layout
 ├── default.memento               compatible v3 snapshot
-├── memento.sock                  local API while running
+├── memento.sock                  Unix local API while running
 ├── mementod.pid                  live process identity
 └── mementod.log                  auto-start log
 ```
@@ -252,7 +254,7 @@ sequenceDiagram
     participant R as Retrieval runtime
 
     U->>I: question + result limit
-    I->>D: POST /query over Unix socket
+    I->>D: POST /query over local IPC
     D->>R: normalize, retrieve, rerank
     R-->>D: ranked chunks + source identity
     D-->>I: answer, confidence, evidence
@@ -274,18 +276,18 @@ access.
 ```mermaid
 flowchart LR
     accTitle: Memento transport trust boundaries
-    accDescr: The CLI and MCP server use a local Unix socket by default. MCP communicates with its host over standard input and output. Optional HTTP is separately authenticated and restricted to loopback unless the operator explicitly overrides the safeguard.
+    accDescr: The CLI and MCP server use a local Unix socket on macOS and Linux or a private named pipe on Windows. MCP communicates with its host over standard input and output. Optional HTTP is separately authenticated and restricted to loopback unless the operator explicitly overrides the safeguard.
 
-    cli["memento CLI"] -->|local Unix socket| daemon["mementod"]
+    cli["memento CLI"] -->|local IPC| daemon["mementod"]
     host["Agent host"] -->|MCP stdio| mcp["memento-mcp"]
-    mcp -->|local Unix socket| daemon
+    mcp -->|local IPC| daemon
     local["Optional local integration"] -->|HTTP + bearer token| daemon
     remote["Remote network"] -.->|blocked by default| daemon
 ```
 
 Security properties:
 
-- Unix socket transport is the default.
+- A Unix socket on macOS/Linux or local named pipe on Windows is the default.
 - HTTP exists only when `--http-port` is passed.
 - HTTP binds to loopback unless non-loopback exposure is explicitly allowed.
 - Every HTTP route except `/health` requires a bearer or Memento token header.

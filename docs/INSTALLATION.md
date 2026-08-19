@@ -16,10 +16,12 @@ Release automation builds these targets:
 | macOS | Intel | `x86_64-apple-darwin` |
 | Linux | arm64 | `aarch64-unknown-linux-gnu` |
 | Linux | x86_64 | `x86_64-unknown-linux-gnu` |
+| Windows | arm64 | `aarch64-pc-windows-msvc` |
+| Windows | x86_64 | `x86_64-pc-windows-msvc` |
 
-Windows feeder presets exist, but the Unix-socket daemon is not yet a supported
-release target. A native Windows transport needs to be productized before the
-full stack can be advertised there.
+Windows uses native `.exe` binaries and a private local named pipe. Unix uses a
+local Unix socket. Both transports expose the same daemon API without requiring
+a public TCP listener.
 
 ## What gets installed
 
@@ -43,7 +45,8 @@ the runtime under `~/.memento` and a vault only at the path you select.
 
 Paste the repository's [agent installation prompt](../AGENT_INSTALL.md) into
 Codex, Claude Code, OpenClaw, or another shell-capable agent. The agent inspects
-and runs `scripts/install.sh`, which can:
+and runs `scripts/install.sh` on Unix or `scripts/install.ps1` on Windows. They
+can:
 
 - preserve an existing installation or install via Homebrew, release, or source
 - install the same canonical skill for one or more agent hosts
@@ -64,9 +67,35 @@ memento-agent-install \
 Use `--dry-run` to preview mutations. The exact host paths and prompt contract
 are documented in [AGENT_INSTALL.md](../AGENT_INSTALL.md).
 
+## Windows PowerShell
+
+PowerShell 5.1 or newer is the supported Windows installation surface. Clone
+and inspect the installer rather than piping a remote script into a shell:
+
+```powershell
+git clone --depth 1 https://github.com/ArvorCo/memento.git
+Set-Location memento
+Get-Content .\scripts\install.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\install.ps1 `
+  -Agent auto `
+  -Integration auto
+```
+
+The default is a verified release install under
+`%LOCALAPPDATA%\Programs\Memento`. The installer supports x64 and ARM64, checks
+the ZIP against `SHA256SUMS`, installs agent skills/integrations, and adds its
+`bin` directory to the current-user `PATH`. It does not change the persistent
+PowerShell execution policy.
+
+For complete Windows runtime, feeder, Git Bash, upgrade, and diagnostic notes,
+see the [Windows guide](WINDOWS.md).
+
 ## Homebrew
 
-Homebrew is the recommended macOS and Linux installation path:
+Homebrew is the recommended macOS installation path and is also available on
+Linux. Linux users who do not already use Homebrew can use the verified release
+installer instead of installing a second package manager:
 
 ```bash
 brew install ArvorCo/tap/memento
@@ -130,7 +159,8 @@ Additional language packs are platform-specific.
 
 ## Prebuilt release archive
 
-Each GitHub release contains one `.tar.gz` per supported target, a
+Each GitHub release contains one `.tar.gz` per macOS/Linux target and one
+`.zip` per Windows target, a
 `SHA256SUMS` file, a generated `memento.rb`, and GitHub artifact attestations.
 
 1. Download the archive and `SHA256SUMS` from
@@ -274,6 +304,15 @@ memento doctor
 memento status
 ```
 
+Windows installs can be upgraded in place with the versioned helper. It
+downloads and verifies the complete matching ZIP before replacing binaries:
+
+```powershell
+memento-agent-install -Program release -Agent auto -Integration auto -SkipInit
+memento doctor
+memento status
+```
+
 Before a minor/major upgrade:
 
 1. read [CHANGELOG.md](../CHANGELOG.md)
@@ -293,6 +332,19 @@ Stop the Homebrew service and remove the package:
 ```bash
 brew services stop memento
 brew uninstall memento
+```
+
+On Windows, stop the daemon using the PID in the selected data directory, then
+remove `%LOCALAPPDATA%\Programs\Memento` and its entry from the current-user
+`PATH`. Removing the program does not remove the store or vault. PowerShell
+example for the default store:
+
+```powershell
+$pidFile = Join-Path $HOME ".memento\mementod.pid"
+if (Test-Path $pidFile) {
+  Stop-Process -Id ([int](Get-Content $pidFile)) -ErrorAction SilentlyContinue
+}
+Remove-Item "$env:LOCALAPPDATA\Programs\Memento" -Recurse -Force
 ```
 
 Uninstalling the formula does **not** remove:

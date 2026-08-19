@@ -37,6 +37,8 @@ Task-focused guides for a working installation.
 
 - **[Installation](INSTALLATION.md)** — agent-guided setup, Homebrew, archives,
   source builds, upgrades, and uninstall behavior.
+- **[Windows](WINDOWS.md)** — native PowerShell installation, named-pipe
+  runtime, feeder, and agent integration.
 - **[Ingestion and vault maintenance](INGESTION.md)** — direct import versus
   feeder pipelines, document conversion, read-only databases, connectors, and
   wiki hubs.
