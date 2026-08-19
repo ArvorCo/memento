@@ -373,7 +373,7 @@ fn render_daemon_config(plan: &InitPlan) -> String {
             .unwrap_or_else(|| "# working_dir intentionally unset".to_string()),
         plan.vault_sync_runner.is_available(),
         plan.schedule_interval,
-        plan.vault_sync_runner.is_available(),
+        false,
         plan.vault_sync_runner.is_available(),
         toml_path(&plan.vault_sync_config_path),
         plan.schedule_interval,
@@ -764,6 +764,7 @@ mod tests {
         assert!(rendered.contains("[vault_sync_runner]"));
         assert!(rendered.contains("command = [\"uv\"]"));
         assert!(rendered.contains("default_interval = \"8h\""));
+        assert!(rendered.contains("run_on_start = false"));
         assert!(rendered.contains("command = \"run-all\""));
     }
 

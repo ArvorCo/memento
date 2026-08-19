@@ -40,6 +40,7 @@ anyhow = "1"
 walkdir = "2"
 pdf-extract = "0.12"
 regex = "1"
+globset = "0.4"
 
 [dev-dependencies]
 tempfile = "3"

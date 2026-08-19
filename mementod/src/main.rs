@@ -13,7 +13,6 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 mod api;
-mod ignore_rules;
 mod manager;
 mod memory_classification;
 mod operation_checkpoint;

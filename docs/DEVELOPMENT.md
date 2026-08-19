@@ -205,7 +205,10 @@ Retrieval work is incomplete without measurement:
 cargo run --release -p memento-research -- doctor
 cargo run --release -p memento-research -- benchmark run \
   --dataset /absolute/path/to/benchmark.jsonl \
-  --top-k 10 \
+  --corpus /absolute/path/to/frozen-corpus \
+  --top-k 5 \
+  --warmup 1 \
+  --repetitions 5 \
   --report /tmp/memento-benchmark.json
 ```
 

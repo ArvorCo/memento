@@ -1,6 +1,6 @@
 use crate::memory_classification::{exact_metadata_text, source_profile};
 use crate::text_utils::{
-    ascii_fold, parse_date_tokens, query_exactness_terms, tokenize_folded_text, tokenize_text,
+    ascii_fold, query_exactness_terms, tokenize_folded_text, tokenize_text, DateConstraint,
     QueryMode,
 };
 use libmemento::format::{DocId, StoredChunk, StoredDocument};
@@ -193,15 +193,39 @@ pub(crate) fn contextual_freshness_score(
 }
 
 pub(crate) fn temporal_match_score(
-    query: &str,
+    query_date: Option<DateConstraint>,
     chunk: &StoredChunk,
     documents: &HashMap<DocId, &StoredDocument>,
 ) -> f64 {
-    let Some(query_date) = parse_date_tokens(query) else {
+    let Some(query_date) = query_date else {
         return 0.0;
     };
     let (_, source_date) = source_profile(chunk, documents);
-    f64::from(source_date == Some(query_date))
+    let Some((source_year, source_month, source_day)) = source_date else {
+        return 0.0;
+    };
+    if query_date.month != source_month || query_date.day != source_day {
+        return 0.0;
+    }
+    match query_date.year {
+        Some(query_year) => f64::from(query_year == source_year),
+        None => 0.8,
+    }
+}
+
+pub(crate) fn temporal_identity_score(
+    temporal_match: f64,
+    metadata_match: f64,
+    exactness: f64,
+    entity_match: f64,
+) -> f64 {
+    if temporal_match <= 0.0 {
+        return 0.0;
+    }
+    temporal_match
+        * ((metadata_match.clamp(0.0, 1.0) * 0.18)
+            + (exactness.clamp(0.0, 1.0) * 0.12)
+            + (entity_match.clamp(0.0, 1.0) * 0.05))
 }
 
 pub(crate) fn episodic_memory_score(
@@ -306,10 +330,23 @@ mod tests {
         let documents = HashMap::new();
         let exact = dated_chunk("memory/2026-04-05-ceo-sprint.md");
         let different_day = dated_chunk("memory/2026-05-04-ceo-sprint.md");
-        let query = "what happened in the sprint on 2026-04-05?";
+        let query_date =
+            crate::text_utils::parse_date_constraint("what happened in the sprint on 2026-04-05?");
 
-        assert_eq!(temporal_match_score(query, &exact, &documents), 1.0);
-        assert_eq!(temporal_match_score(query, &different_day, &documents), 0.0);
+        assert_eq!(temporal_match_score(query_date, &exact, &documents), 1.0);
+        assert_eq!(
+            temporal_match_score(query_date, &different_day, &documents),
+            0.0
+        );
+    }
+
+    #[test]
+    fn temporal_identity_requires_date_and_rewards_metadata() {
+        assert_eq!(temporal_identity_score(0.0, 1.0, 1.0, 1.0), 0.0);
+        assert!(
+            temporal_identity_score(1.0, 0.9, 0.8, 0.0)
+                > temporal_identity_score(1.0, 0.2, 0.1, 0.0)
+        );
     }
 
     #[test]

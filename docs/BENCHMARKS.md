@@ -6,64 +6,84 @@
 [← Documentation](README.md) · [Retrieval design](RETRIEVAL.md) ·
 [Development](DEVELOPMENT.md) · [Releasing](RELEASING.md)
 
-## Current 0.1.0 baseline
+## Current development baseline
 
-Measured on 2026-08-17 with optimized arm64 macOS binaries against a private,
-real-world Markdown corpus:
+Measured on 2026-08-19 with optimized arm64 macOS binaries against a frozen
+snapshot of a private, real-world personal memory corpus:
 
-- 2,202 source documents
-- 19,557 indexed chunks
-- 69,327 vocabulary terms
-- 1,580 resolved document-graph links
-- 10 manually curated questions with expected source files and answer terms
-- CPU-only postings, metadata, graph, temporal, and spectral signals
+- 2,869 supported non-empty source documents; 2,868 parsed by the baseline
+- 24,563 indexed chunks
+- 27,374,503 corpus bytes; SHA-256 `b671a5cf…63b81`
+- 30 manually curated English and Portuguese questions
+- one complete warm-up pass and five measured observations per question
+- CPU-only lexical, metadata, graph, temporal, and spectral signals
 - no hosted embedding or LLM call
 
-| Metric | Memento | Simple lexical baseline | Delta |
-| --- | ---: | ---: | ---: |
-| hit@10 | 100% | 90% | +10 pp |
-| mean reciprocal rank | 1.000 | 0.900 | +0.100 |
-| result-term recall | 1.000 | 0.960 | +0.040 |
-| answer-term recall | 0.700 | n/a | n/a |
-| query latency p50 | 13.5 ms | 14.9 ms | −1.4 ms |
-| query latency p95 | 14.5 ms | 19.8 ms | −5.3 ms |
+The before and after runs used the same dataset SHA-256, corpus SHA-256, and
+persisted Memento store. `v0.2.0` is commit `321942b`; v0.2.1 contains the
+retrieval change described in this document.
 
-These numbers are a regression snapshot, not a universal search claim. Ten
-questions are useful for catching known breakage and inadequate for estimating
-performance across all vaults, languages, or query types.
+| Metric | v0.2.0 | v0.2.1 | Fielded BM25 | v0.2.1 vs v0.2.0 |
+| --- | ---: | ---: | ---: | ---: |
+| hit@5 | 86.7% | 100% | 73.3% | +13.3 pp |
+| mean reciprocal rank | 0.793 | 1.000 | 0.650 | +0.207 |
+| result-term recall | 0.940 | 0.980 | 0.947 | +0.040 |
+| answer-term recall | 0.747 | 0.760 | n/a | +0.013 |
+| query latency p50 | 13.5 ms | 14.8 ms | 1.7 ms | +1.3 ms |
+| query latency p95 | 16.2 ms | 17.6 ms | 2.0 ms | +1.4 ms |
+
+Initial ingest took 4.51 seconds for 2,869 files and produced a 38 MiB store.
+After restart and a warm query, the daemon used approximately 703 MiB RSS.
+RSS is a steady-state observation, not a peak-memory measurement.
+
+These numbers are a regression snapshot, not a universal search claim. Thirty
+questions cover known failure classes and remain inadequate for estimating
+performance across every vault, language, or query type. Raw cases and reports
+stay private because the source corpus is personal.
 
 ## What the runner compares
 
 ```mermaid
 flowchart LR
     accTitle: Benchmark comparison design
-    accDescr: The same JSONL cases and source documents feed a live Memento daemon and a deterministic simple lexical baseline. Their source ranks, term coverage, and elapsed query times are aggregated into one report with per-case details.
+    accDescr: The same explicit corpus and JSONL cases feed a live Memento daemon and a deterministic fielded BM25 baseline. Their source ranks, term coverage, confidence, stability, and repeated elapsed query times are aggregated into one fingerprinted report.
 
     cases["JSONL cases"] --> memento["Live Memento daemon"]
-    cases --> simple["Simple lexical baseline"]
-    docs["Expected source documents"] --> simple
-    memento --> report["Hit rate · MRR · term recall · latency"]
-    simple --> report
+    cases --> bm25f["Fielded BM25 baseline"]
+    corpus["Explicit corpus"] --> memento
+    corpus --> bm25f
+    memento --> report["Ranks · recall · confidence · latency"]
+    bm25f --> report
 ```
 
-The simple baseline loads the expected document set and applies deterministic
-lexical scoring. It is a sanity floor, not Lucene, Tantivy, or a state-of-the-art
-external engine. A retrieval change should beat both its prior Memento result
-and this baseline for the intended failure class.
+Both paths use `libmemento` corpus discovery, including `.mementoignore`, built-in
+directory exclusions, and supported document types. The runner refuses cases
+whose expected source is outside that corpus.
+
+The lexical comparator is an in-process, deterministic BM25F-style inverted
+index over title, path, and body fields. It uses `k1 = 1.2`, `b = 0.75`, the
+standard Robertson IDF formula, length normalization, and deterministic path
+tie-breaking. It is intentionally smaller than Lucene or Tantivy, but no longer
+a term-presence toy. See the [Tantivy BM25 implementation](https://github.com/quickwit-oss/tantivy/blob/main/src/query/bm25.rs),
+[Lucene similarity reference](https://lucene.apache.org/core/9_3_0/core/org/apache/lucene/search/similarities/package-summary.html),
+and Microsoft Research's [BM25F work](https://www.microsoft.com/en-us/research/publication/microsoft-cambridge-at-trec-2004-web-and-hard-track/).
+
+A retrieval change should beat both its prior Memento result and this baseline
+for the intended failure class.
 
 ## Dataset schema
 
 The runner accepts one JSON object per line:
 
 ```json
-{"id":"auth-001","query":"What did we decide about authentication?","expected_path":"/absolute/vault/decisions/auth.md","expected_title":"Authentication decision","expected_terms":["passkeys","offline"],"excerpt":"Use passkeys for the offline-first launch."}
+{"id":"auth-001","query":"What did we decide about authentication?","expected_path":"decisions/auth.md","expected_title":"Authentication decision","expected_terms":["passkeys","offline"],"excerpt":"Use passkeys for the offline-first launch."}
 ```
 
 | Field | Purpose |
 | --- | --- |
 | `id` | Stable case identity in reports and regressions |
 | `query` | Exact user-like query sent to the daemon |
-| `expected_path` | Canonical absolute source path that should appear in top-k |
+| `expected_path` | Source path relative to `--corpus`, or a canonical absolute path |
 | `expected_title` | Human-readable expected document title |
 | `expected_terms` | Facts/terms expected in results and answer |
 | `excerpt` | Curator evidence used to justify the case |
@@ -110,15 +130,19 @@ The same expected-term fraction is measured over Memento's answer. This catches
 cases where the right evidence was retrieved but answer composition omitted a
 required fact. The simple baseline has no answer layer.
 
-### Latency
+### Confidence, stability, and latency
 
-The runner records wall-clock duration per query and reports total, average,
-p50, p95, and p99 using nearest-rank-style percentile selection. Memento latency
-includes Unix-socket request/response and answer generation. The simple baseline
-runs in the benchmark process after its documents are loaded.
+The runner records Memento's confidence and whether source rank remained stable
+across measured repetitions. Confidence is diagnostic; it is not yet calibrated
+as a probability of correctness.
 
-With tiny suites, tail percentiles are unstable: p95 of ten cases is effectively
-one slow observation.
+Wall-clock duration is reported as total, average, p50, p95, and p99 using
+nearest-rank-style percentile selection. Memento latency includes local IPC and
+answer generation. BM25 index construction is reported separately from query
+latency. On Unix, IPC uses a Unix socket; on Windows, it uses the same named-pipe
+transport as the CLI.
+
+With small suites, tail percentiles remain noisy even with repeated observations.
 
 ## Curate a dataset
 
@@ -162,12 +186,17 @@ export MEMENTO_DATA_DIR=/absolute/path/to/benchmark-store
 
 cargo run --release -p memento-research -- benchmark run \
   --dataset /absolute/path/to/benchmark.jsonl \
-  --top-k 10 \
+  --corpus /absolute/path/to/frozen-corpus \
+  --top-k 5 \
+  --warmup 1 \
+  --repetitions 5 \
   --report /tmp/memento-benchmark.json
 ```
 
-The runner checks that the daemon is available and writes aggregate plus
-per-case JSON. Use `--limit` for a quick iteration without changing the dataset.
+`--corpus` is mandatory. The runner writes aggregate plus per-case JSON with
+dataset and corpus SHA-256 fingerprints, parser counts, baseline build time,
+confidence, rank stability, and repeated latency distributions. Use `--limit`
+for a quick iteration without changing the dataset.
 
 ## Reproducible comparison protocol
 
@@ -183,14 +212,16 @@ For a before/after claim, hold these constant:
 
 Recommended sequence:
 
-1. create/restore the same benchmark store
-2. start the release daemon and perform one warm-up query
-3. run the complete suite and retain its JSON report
-4. apply the change and rebuild in release mode
-5. restore the store if the change mutated format or learned state
-6. run the same warm-up and suite
-7. inspect aggregate deltas and every changed rank
-8. repeat when latency differences are close to system noise
+1. freeze the source corpus; do not benchmark a live feeder destination
+2. create/restore the same benchmark store with scheduler jobs disabled
+3. start the release daemon and run the complete suite with warm-up/repetitions
+4. retain the JSON report and its two SHA-256 fingerprints
+5. apply the change and rebuild in release mode
+6. restore the store if the change mutated format or learned state
+7. rerun with the exact same dataset, corpus, and options
+8. reject the comparison if either fingerprint differs
+9. inspect aggregate deltas and every changed rank
+10. repeat when latency differences are close to system noise
 
 Do not compare a debug binary with a release binary or a cold start with a warm
 run.
@@ -205,7 +236,7 @@ run.
 | Answer recall falls alone | Answer composition, cleaning, evidence cap |
 | p50 rises | Hot-path postings, projection, allocation, serialization |
 | p95/p99 rises | Large documents, graph expansion, cold caches, contention |
-| Simple baseline wins case | Query normalization or ranking complexity hurting exact search |
+| BM25 baseline wins case | Query normalization or ranking complexity hurting exact search |
 
 A single aggregate can hide offsetting failures. The per-case report is the
 first place to look.
@@ -222,19 +253,17 @@ private conversations through datasets, paths, misses, excerpts, or reports.
 - review `misses` and `per_case` before attaching a report
 - never upload a `.memento` store as debugging evidence
 
-The 0.1.0 corpus is private, so the baseline is reproducible only in method, not
-bit-for-bit data. That limitation must accompany the numbers.
+The current corpus is private, so the baseline is reproducible only in method,
+not bit-for-bit data. That limitation must accompany the numbers.
 
 ## Current gaps
 
 - larger manually judged suites
 - nDCG or graded multi-source relevance
 - adversarial stale/conflicting/near-duplicate cases
-- cold-start and ingest throughput
-- peak memory and index size
+- repeatable cold-start, peak-memory, and ingest scaling curves
 - 100,000+ document scaling curves
 - multilingual suites beyond curated bridges
-- comparison with mature lexical engines under the same corpus contract
 - calibrated confidence and factual entailment evaluation
 
 These are roadmap items, not reasons to hide the current baseline.

@@ -37,71 +37,6 @@ fn fingerprint_file(path: &Path) -> Result<FileFingerprint> {
     })
 }
 
-fn is_text_like(path: &Path) -> bool {
-    let name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("");
-    if matches!(name, ".DS_Store" | ".vault_index.db") {
-        return false;
-    }
-
-    let ext = path
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-
-    matches!(
-        ext.as_str(),
-        "md" | "markdown"
-            | "pdf"
-            | "txt"
-            | "canvas"
-            | "json"
-            | "jsonl"
-            | "js"
-            | "ts"
-            | "jsx"
-            | "tsx"
-            | "rs"
-            | "py"
-            | "sh"
-            | "zsh"
-            | "bash"
-            | "yaml"
-            | "yml"
-            | "toml"
-            | "csv"
-            | "sql"
-            | "html"
-            | "css"
-            | "xml"
-            | "env"
-            | "local"
-            | "mdx"
-            | "conf"
-    ) || name.starts_with(".env")
-}
-
-pub(super) fn should_skip_indexing_dir(name: &str) -> bool {
-    matches!(
-        name,
-        ".git"
-            | ".obsidian"
-            | ".entire"
-            | "node_modules"
-            | "target"
-            | ".next"
-            | "dist"
-            | "build"
-            | "coverage"
-            | ".venv"
-            | "venv"
-            | "vendor"
-    )
-}
-
 fn diff_manifests(previous: &SourceManifest, current: &SourceManifest) -> ManifestDiff {
     let previous_map: HashMap<&str, &FileFingerprint> = previous
         .files
@@ -287,59 +222,20 @@ impl MementoManager {
     }
 
     pub(super) fn collect_folder_files(&self, source_key: &str) -> Result<Vec<FileFingerprint>> {
-        let ignore_rules = IgnoreRules::load(Path::new(source_key))?;
-        let mut files = Vec::new();
-        for entry in walkdir::WalkDir::new(source_key)
-            .into_iter()
-            .filter_entry(|entry| {
-                if entry.depth() == 0 {
-                    return true;
-                }
-                let name = entry.file_name().to_string_lossy();
-                if should_skip_indexing_dir(&name) {
-                    return false;
-                }
-                !ignore_rules.is_ignored(entry.path(), entry.file_type().is_dir())
-            })
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_type().is_file())
-        {
-            if !ignore_rules.is_ignored(entry.path(), false) && is_text_like(entry.path()) {
-                let fingerprint = fingerprint_file(entry.path())?;
-                if fingerprint.size > 0 {
-                    files.push(fingerprint);
-                }
-            }
-        }
-        Ok(files)
+        libmemento::sync::discovery::discover_documents(Path::new(source_key)).map(|documents| {
+            documents
+                .into_iter()
+                .map(|document| FileFingerprint {
+                    path: document.path.to_string_lossy().to_string(),
+                    size: document.size,
+                    modified_unix_ms: document.modified_unix_ms,
+                })
+                .collect()
+        })
     }
 
     pub(super) fn collect_obsidian_files(&self, source_key: &str) -> Result<Vec<FileFingerprint>> {
-        let ignore_rules = IgnoreRules::load(Path::new(source_key))?;
-        let mut files = Vec::new();
-        for entry in walkdir::WalkDir::new(source_key)
-            .into_iter()
-            .filter_entry(|entry| {
-                if entry.depth() == 0 {
-                    return true;
-                }
-                let name = entry.file_name().to_string_lossy();
-                if should_skip_indexing_dir(&name) {
-                    return false;
-                }
-                !ignore_rules.is_ignored(entry.path(), entry.file_type().is_dir())
-            })
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_type().is_file())
-        {
-            if !ignore_rules.is_ignored(entry.path(), false) && is_text_like(entry.path()) {
-                let fingerprint = fingerprint_file(entry.path())?;
-                if fingerprint.size > 0 {
-                    files.push(fingerprint);
-                }
-            }
-        }
-        Ok(files)
+        self.collect_folder_files(source_key)
     }
 
     pub(super) async fn load_chunks_for_files(

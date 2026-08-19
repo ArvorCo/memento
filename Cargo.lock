@@ -1092,12 +1092,13 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libmemento"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "approx 0.5.1",
  "bincode",
  "chrono",
+ "globset",
  "lanczos",
  "lru",
  "nalgebra",
@@ -1227,7 +1228,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "memento-api"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1245,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "memento-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1268,14 +1269,14 @@ dependencies = [
 
 [[package]]
 name = "memento-ipc"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "memento-mcp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1293,7 +1294,7 @@ dependencies = [
 
 [[package]]
 name = "memento-research"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1302,25 +1303,26 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "libmemento",
  "memento-ipc",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "tokio",
  "unicode-normalization",
- "walkdir",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "mementod"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "axum",
  "bincode",
  "clap",
  "dirs",
- "globset",
  "hyper",
  "hyper-util",
  "libmemento",

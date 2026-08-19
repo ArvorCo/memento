@@ -110,7 +110,10 @@ For any ranking, chunking, learning, graph, or answer-composition change:
 ```bash
 cargo run --release -p memento-research -- benchmark run \
   --dataset /absolute/path/to/benchmark.jsonl \
-  --top-k 10 \
+  --corpus /absolute/path/to/frozen-corpus \
+  --top-k 5 \
+  --warmup 1 \
+  --repetitions 5 \
   --report /tmp/memento-release-benchmark.json
 ```
 
@@ -272,7 +275,7 @@ A useful release note includes:
 - known limitations
 - links to changelog and documentation
 
-Avoid claiming universal retrieval quality from a private ten-query suite.
+Avoid claiming universal retrieval quality from a small private regression suite.
 
 ## Failed or bad release
 

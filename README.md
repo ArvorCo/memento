@@ -206,19 +206,22 @@ It never receives arbitrary filesystem access from the MCP server.
 
 ## Measured baseline
 
-The current regression benchmark used an optimized arm64 macOS build and a
-private, real-world corpus with 19,557 chunks:
+The current regression benchmark used optimized arm64 macOS binaries, a frozen
+2,869-document personal-memory snapshot, and 30 curated English/Portuguese
+questions. No hosted embedding or LLM call was used.
 
-| Metric | Memento | Simple lexical baseline |
+| Metric | Memento | Fielded BM25 baseline |
 | --- | ---: | ---: |
-| hit@10 | 100% | 90% |
-| mean reciprocal rank | 1.000 | 0.900 |
-| result-term recall | 1.000 | 0.960 |
-| query latency p50 | 13.5 ms | 14.9 ms |
-| query latency p95 | 14.5 ms | 19.8 ms |
+| hit@5 | 100% | 73.3% |
+| mean reciprocal rank | 1.000 | 0.650 |
+| result-term recall | 0.980 | 0.947 |
+| query latency p50 | 14.8 ms | 1.7 ms |
+| query latency p95 | 17.6 ms | 2.0 ms |
 
-Ten curated questions make this a regression baseline, not a universal quality
-claim. Read the [method, limitations, and reproduction guide](docs/BENCHMARKS.md).
+Against v0.2.0 on the same corpus, dataset, and persisted store, hit@5 improved
+from 86.7% to 100% and MRR from 0.793 to 1.000. Thirty cases are still a
+regression suite, not a universal quality claim. Read the
+[method, fingerprints, limitations, and reproduction guide](docs/BENCHMARKS.md).
 
 ## Documentation
 

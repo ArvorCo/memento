@@ -108,7 +108,7 @@ Research:
 
 - `cargo run -p memento-research -- doctor`
 - `cargo run -p memento-research -- probe --backend mlx`
-- `cargo run -p memento-research -- benchmark run --dataset <path> --report <path>`
+- `cargo run -p memento-research -- benchmark run --dataset <path> --corpus <path> --report <path>`
 
 Web:
 

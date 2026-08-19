@@ -70,12 +70,21 @@ enum BenchmarkCommands {
         /// Benchmark dataset path in JSONL format
         #[arg(long, default_value = "research/benchmarks/dataset.jsonl")]
         dataset: String,
+        /// Explicit corpus root shared by Memento and the lexical baseline
+        #[arg(long)]
+        corpus: String,
         /// Max query results to ask from the daemon
         #[arg(long, default_value_t = 5)]
         top_k: usize,
         /// Optional limit on benchmark cases
         #[arg(long)]
         limit: Option<usize>,
+        /// Complete unmeasured suite passes before timing
+        #[arg(long, default_value_t = 1)]
+        warmup: usize,
+        /// Measured observations per case
+        #[arg(long, default_value_t = 3)]
+        repetitions: usize,
         /// Report file written as JSON
         #[arg(long, default_value = "research/reports/latest.json")]
         report: String,
@@ -153,10 +162,24 @@ async fn main() -> Result<()> {
             } => build_benchmark(&vault, &output, limit)?,
             BenchmarkCommands::Run {
                 dataset,
+                corpus,
                 top_k,
                 limit,
+                warmup,
+                repetitions,
                 report,
-            } => run_benchmark(&dataset, top_k, limit, &report).await?,
+            } => {
+                run_benchmark(
+                    &dataset,
+                    &corpus,
+                    top_k,
+                    limit,
+                    warmup,
+                    repetitions,
+                    &report,
+                )
+                .await?
+            }
         },
     }
 

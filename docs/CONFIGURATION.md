@@ -95,7 +95,7 @@ command = ["memento-vault-sync"]
 [scheduler]
 enabled = true
 default_interval = "8h"
-run_on_start = true
+run_on_start = false
 batch_updates = true
 
 [[scheduler.jobs]]

@@ -1,22 +1,17 @@
 use anyhow::{Context, Result};
-use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
-use hyper::Request;
-use hyper_util::rt::TokioIo;
+use libmemento::sync::discovery::discover_documents;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::Instant;
 use unicode_normalization::char::is_combining_mark;
 use unicode_normalization::UnicodeNormalization;
-use walkdir::WalkDir;
 
-#[cfg(windows)]
-use tokio::net::windows::named_pipe::NamedPipeClient;
-#[cfg(unix)]
-use tokio::net::UnixStream;
+mod baseline;
+use baseline::BaselineIndex;
+mod runtime;
+use runtime::{ensure_daemon, post};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BenchmarkCase {
@@ -30,13 +25,31 @@ struct BenchmarkCase {
 
 #[derive(Debug, Serialize)]
 struct BenchmarkReport {
+    schema_version: u32,
+    engine_version: &'static str,
+    platform: String,
     dataset: String,
+    dataset_sha256: String,
+    corpus: CorpusSummary,
     cases: usize,
     top_k: usize,
+    warmup_rounds: usize,
+    repetitions: usize,
     memento: BenchmarkSummary,
-    simple_search: BenchmarkSummary,
+    bm25f: BenchmarkSummary,
     comparison: BenchmarkComparison,
     per_case: Vec<BenchmarkCaseReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct CorpusSummary {
+    root: String,
+    discovered_documents: usize,
+    indexed_documents: usize,
+    bytes: u64,
+    sha256: String,
+    discovery_ms: f64,
+    baseline_index_build_ms: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -44,8 +57,9 @@ struct BenchmarkSummary {
     hits: usize,
     hit_rate: f64,
     mrr: f64,
-    avg_answer_term_recall: f64,
+    avg_answer_term_recall: Option<f64>,
     avg_result_term_recall: f64,
+    avg_confidence: Option<f64>,
     latency_ms: LatencySummary,
     misses: Vec<BenchmarkMiss>,
 }
@@ -63,21 +77,23 @@ struct LatencySummary {
 struct BenchmarkCaseReport {
     id: String,
     memento_rank: Option<usize>,
-    simple_rank: Option<usize>,
+    bm25f_rank: Option<usize>,
     memento_top_path: Option<String>,
-    simple_top_path: Option<String>,
-    memento_latency_ms: f64,
-    simple_latency_ms: f64,
+    bm25f_top_path: Option<String>,
+    memento_latency_ms: LatencySummary,
+    bm25f_latency_ms: LatencySummary,
+    memento_confidence: f64,
+    memento_rank_stable: bool,
+    bm25f_rank_stable: bool,
 }
 
 #[derive(Debug, Serialize)]
 struct BenchmarkComparison {
     hit_rate_delta: f64,
     mrr_delta: f64,
-    answer_term_recall_delta: f64,
     result_term_recall_delta: f64,
     memento_only_hits: usize,
-    simple_only_hits: usize,
+    bm25f_only_hits: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,22 +108,13 @@ struct BenchmarkMiss {
 struct QueryResponse {
     answer: String,
     results: Vec<QueryResult>,
+    confidence: f64,
 }
 
 #[derive(Debug, Deserialize)]
 struct QueryResult {
     content: String,
     source_path: String,
-}
-
-#[derive(Debug, Clone)]
-struct SimpleSearchDocument {
-    path: String,
-    title: String,
-    title_tokens: Vec<String>,
-    path_tokens: Vec<String>,
-    content_tokens: Vec<String>,
-    content: String,
 }
 
 pub fn build_benchmark(vault: &str, output: &str, limit: usize) -> Result<()> {
@@ -118,17 +125,16 @@ pub fn build_benchmark(vault: &str, output: &str, limit: usize) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    let mut files: Vec<PathBuf> = WalkDir::new(&vault_path)
+    let documents = discover_documents(&vault_path)?;
+    let files: Vec<PathBuf> = documents
         .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().is_file())
-        .map(|entry| entry.into_path())
+        .map(|document| document.path)
         .filter(|path| is_markdown(path))
         .collect();
-    files.sort();
+    let files = evenly_sample(files, limit);
 
     let mut cases = Vec::new();
-    for path in files.into_iter().take(limit) {
+    for path in files {
         let Ok(contents) = fs::read_to_string(&path) else {
             continue;
         };
@@ -149,10 +155,7 @@ pub fn build_benchmark(vault: &str, output: &str, limit: usize) -> Result<()> {
         cases.push(BenchmarkCase {
             id: relative.replace('/', "::"),
             query,
-            expected_path: fs::canonicalize(&path)
-                .unwrap_or(path.clone())
-                .display()
-                .to_string(),
+            expected_path: relative,
             expected_title: title,
             expected_terms,
             excerpt,
@@ -173,43 +176,131 @@ pub fn build_benchmark(vault: &str, output: &str, limit: usize) -> Result<()> {
     Ok(())
 }
 
+fn evenly_sample<T>(values: Vec<T>, limit: usize) -> Vec<T> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    if values.len() <= limit {
+        return values;
+    }
+    let mut values: Vec<Option<T>> = values.into_iter().map(Some).collect();
+    let last = values.len() - 1;
+    (0..limit)
+        .map(|sample| {
+            let index = sample * last / (limit - 1).max(1);
+            values[index].take().expect("sample indexes are unique")
+        })
+        .collect()
+}
+
 pub async fn run_benchmark(
     dataset: &str,
+    corpus: &str,
     top_k: usize,
     limit: Option<usize>,
+    warmup_rounds: usize,
+    repetitions: usize,
     report: &str,
 ) -> Result<()> {
-    ensure_daemon().await?;
+    anyhow::ensure!(top_k > 0, "--top-k must be greater than zero");
+    anyhow::ensure!(repetitions > 0, "--repetitions must be greater than zero");
 
-    let dataset_path = PathBuf::from(dataset);
+    let dataset_path = fs::canonicalize(expand_tilde(dataset))
+        .with_context(|| format!("Could not resolve dataset path {dataset}"))?;
     let raw = fs::read_to_string(&dataset_path)
         .with_context(|| format!("Could not read dataset {}", dataset_path.display()))?;
     let mut cases = Vec::new();
-    for line in raw.lines().filter(|line| !line.trim().is_empty()) {
-        let case: BenchmarkCase = serde_json::from_str(line)?;
+    for (line_number, line) in raw.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let case: BenchmarkCase = serde_json::from_str(line).with_context(|| {
+            format!(
+                "Invalid benchmark case at {}:{}",
+                dataset_path.display(),
+                line_number + 1
+            )
+        })?;
         cases.push(case);
     }
     if let Some(limit) = limit {
         cases.truncate(limit);
     }
+    anyhow::ensure!(
+        !cases.is_empty(),
+        "Benchmark dataset does not contain any cases"
+    );
 
-    let simple_documents = load_simple_search_documents(&cases)?;
+    let corpus_started = Instant::now();
+    let corpus_path = fs::canonicalize(expand_tilde(corpus))
+        .with_context(|| format!("Could not resolve corpus path {corpus}"))?;
+    anyhow::ensure!(corpus_path.is_dir(), "Corpus must be a directory");
+    let discovered = discover_documents(&corpus_path)?;
+    let discovery_ms = corpus_started.elapsed().as_secs_f64() * 1_000.0;
+    anyhow::ensure!(
+        !discovered.is_empty(),
+        "Corpus does not contain any supported non-empty documents"
+    );
+
+    let corpus_paths = discovered
+        .iter()
+        .map(|document| canonicalize_loose(&document.path.to_string_lossy()))
+        .collect::<std::collections::HashSet<_>>();
+    let mut case_ids = std::collections::HashSet::new();
+    for case in &mut cases {
+        anyhow::ensure!(
+            case_ids.insert(case.id.clone()),
+            "Duplicate benchmark case id `{}`",
+            case.id
+        );
+        let expected_path = PathBuf::from(&case.expected_path);
+        case.expected_path = if expected_path.is_absolute() {
+            canonicalize_loose(&case.expected_path)
+        } else {
+            canonicalize_loose(&corpus_path.join(expected_path).to_string_lossy())
+        };
+        anyhow::ensure!(
+            corpus_paths.contains(&case.expected_path),
+            "Expected path for case `{}` is not in the explicit corpus: {}",
+            case.id,
+            case.expected_path
+        );
+    }
+
+    let (corpus_sha256, corpus_bytes) = corpus_fingerprint(&corpus_path, &discovered)?;
+    let bm25f_index = BaselineIndex::build(&discovered)?;
+    anyhow::ensure!(
+        bm25f_index.document_count() > 0,
+        "No corpus documents could be parsed for the BM25F baseline"
+    );
+
+    ensure_daemon().await?;
+    for _ in 0..warmup_rounds {
+        for case in &cases {
+            let body = serde_json::json!({ "query": case.query, "top_k": top_k });
+            let response = post("/query", &body.to_string()).await?;
+            let _: QueryResponse = serde_json::from_str(&response)?;
+            let _ = bm25f_index.search(&case.query, top_k);
+        }
+    }
 
     let mut memento_hits = 0usize;
     let mut memento_reciprocal_rank_sum = 0.0;
     let mut memento_answer_term_sum = 0.0;
     let mut memento_result_term_sum = 0.0;
+    let mut memento_confidence_sum = 0.0;
     let mut memento_misses = Vec::new();
 
-    let mut simple_hits = 0usize;
-    let mut simple_reciprocal_rank_sum = 0.0;
-    let mut simple_result_term_sum = 0.0;
-    let mut simple_misses = Vec::new();
+    let mut bm25f_hits = 0usize;
+    let mut bm25f_reciprocal_rank_sum = 0.0;
+    let mut bm25f_result_term_sum = 0.0;
+    let mut bm25f_misses = Vec::new();
 
     let mut memento_only_hits = 0usize;
-    let mut simple_only_hits = 0usize;
-    let mut memento_latencies = Vec::with_capacity(cases.len());
-    let mut simple_latencies = Vec::with_capacity(cases.len());
+    let mut bm25f_only_hits = 0usize;
+    let observation_count = cases.len() * repetitions;
+    let mut memento_latencies = Vec::with_capacity(observation_count);
+    let mut bm25f_latencies = Vec::with_capacity(observation_count);
     let mut per_case = Vec::with_capacity(cases.len());
 
     for case in &cases {
@@ -217,16 +308,53 @@ pub async fn run_benchmark(
             "query": case.query,
             "top_k": top_k,
         });
+        let mut case_memento_latencies = Vec::with_capacity(repetitions);
+        let mut case_bm25f_latencies = Vec::with_capacity(repetitions);
+        let mut memento_ranks = Vec::with_capacity(repetitions);
+        let mut bm25f_ranks = Vec::with_capacity(repetitions);
+        let mut parsed_response = None;
+        let mut first_bm25f_paths = None;
 
-        let memento_started = Instant::now();
-        let response = post("/query", &body.to_string()).await?;
-        let memento_latency_ms = memento_started.elapsed().as_secs_f64() * 1_000.0;
-        memento_latencies.push(memento_latency_ms);
-        let parsed: QueryResponse = serde_json::from_str(&response)?;
-        let rank = parsed
-            .results
-            .iter()
-            .position(|result| canonicalize_loose(&result.source_path) == case.expected_path);
+        for _ in 0..repetitions {
+            let memento_started = Instant::now();
+            let response = post("/query", &body.to_string()).await?;
+            let memento_latency_ms = memento_started.elapsed().as_secs_f64() * 1_000.0;
+            memento_latencies.push(memento_latency_ms);
+            case_memento_latencies.push(memento_latency_ms);
+            let parsed: QueryResponse = serde_json::from_str(&response)?;
+            memento_ranks.push(
+                parsed.results.iter().position(|result| {
+                    canonicalize_loose(&result.source_path) == case.expected_path
+                }),
+            );
+            if parsed_response.is_none() {
+                parsed_response = Some(parsed);
+            }
+
+            let bm25f_started = Instant::now();
+            let results = bm25f_index.search(&case.query, top_k);
+            let bm25f_latency_ms = bm25f_started.elapsed().as_secs_f64() * 1_000.0;
+            bm25f_latencies.push(bm25f_latency_ms);
+            case_bm25f_latencies.push(bm25f_latency_ms);
+            bm25f_ranks.push(
+                results
+                    .iter()
+                    .position(|result| result.path == case.expected_path),
+            );
+            if first_bm25f_paths.is_none() {
+                first_bm25f_paths = Some(
+                    results
+                        .into_iter()
+                        .map(|result| (result.path.to_string(), result.content.to_string()))
+                        .collect::<Vec<_>>(),
+                );
+            }
+        }
+
+        let parsed = parsed_response.expect("repetitions are non-zero");
+        let bm25f_results = first_bm25f_paths.expect("repetitions are non-zero");
+        let rank = memento_ranks[0];
+        let bm25f_rank = bm25f_ranks[0];
 
         let memento_hit = rank.is_some();
         if let Some(rank) = rank {
@@ -245,6 +373,7 @@ pub async fn run_benchmark(
         }
 
         memento_answer_term_sum += term_recall(&parsed.answer, &case.expected_terms);
+        memento_confidence_sum += parsed.confidence;
         let combined_results = parsed
             .results
             .iter()
@@ -253,87 +382,97 @@ pub async fn run_benchmark(
             .join("\n");
         memento_result_term_sum += term_recall(&combined_results, &case.expected_terms);
 
-        let simple_started = Instant::now();
-        let simple_results = simple_search(&simple_documents, &case.query, top_k);
-        let simple_latency_ms = simple_started.elapsed().as_secs_f64() * 1_000.0;
-        simple_latencies.push(simple_latency_ms);
-        let simple_rank = simple_results
-            .iter()
-            .position(|result| result.path == case.expected_path);
-        let simple_hit = simple_rank.is_some();
-        if let Some(rank) = simple_rank {
-            simple_hits += 1;
-            simple_reciprocal_rank_sum += 1.0 / (rank as f64 + 1.0);
+        let bm25f_hit = bm25f_rank.is_some();
+        if let Some(rank) = bm25f_rank {
+            bm25f_hits += 1;
+            bm25f_reciprocal_rank_sum += 1.0 / (rank as f64 + 1.0);
         } else {
-            simple_misses.push(BenchmarkMiss {
+            bm25f_misses.push(BenchmarkMiss {
                 id: case.id.clone(),
                 query: case.query.clone(),
                 expected_path: case.expected_path.clone(),
-                top_result_path: simple_results.first().map(|result| result.path.clone()),
+                top_result_path: bm25f_results.first().map(|result| result.0.clone()),
             });
         }
-        let simple_combined = simple_results
+        let bm25f_combined = bm25f_results
             .iter()
-            .map(|result| result.content.as_str())
+            .map(|result| result.1.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        simple_result_term_sum += term_recall(&simple_combined, &case.expected_terms);
+        bm25f_result_term_sum += term_recall(&bm25f_combined, &case.expected_terms);
 
-        if memento_hit && !simple_hit {
+        if memento_hit && !bm25f_hit {
             memento_only_hits += 1;
-        } else if simple_hit && !memento_hit {
-            simple_only_hits += 1;
+        } else if bm25f_hit && !memento_hit {
+            bm25f_only_hits += 1;
         }
 
         per_case.push(BenchmarkCaseReport {
             id: case.id.clone(),
             memento_rank: rank.map(|value| value + 1),
-            simple_rank: simple_rank.map(|value| value + 1),
+            bm25f_rank: bm25f_rank.map(|value| value + 1),
             memento_top_path: parsed
                 .results
                 .first()
                 .map(|result| result.source_path.clone()),
-            simple_top_path: simple_results.first().map(|result| result.path.clone()),
-            memento_latency_ms,
-            simple_latency_ms,
+            bm25f_top_path: bm25f_results.first().map(|result| result.0.clone()),
+            memento_latency_ms: summarize_latencies(&case_memento_latencies),
+            bm25f_latency_ms: summarize_latencies(&case_bm25f_latencies),
+            memento_confidence: parsed.confidence,
+            memento_rank_stable: ranks_are_stable(&memento_ranks),
+            bm25f_rank_stable: ranks_are_stable(&bm25f_ranks),
         });
     }
 
-    let case_count = cases.len().max(1);
+    let case_count = cases.len();
     let memento = BenchmarkSummary {
         hits: memento_hits,
         hit_rate: memento_hits as f64 / case_count as f64,
         mrr: memento_reciprocal_rank_sum / case_count as f64,
-        avg_answer_term_recall: memento_answer_term_sum / case_count as f64,
+        avg_answer_term_recall: Some(memento_answer_term_sum / case_count as f64),
         avg_result_term_recall: memento_result_term_sum / case_count as f64,
+        avg_confidence: Some(memento_confidence_sum / case_count as f64),
         latency_ms: summarize_latencies(&memento_latencies),
         misses: memento_misses.into_iter().take(12).collect(),
     };
-    let simple_search = BenchmarkSummary {
-        hits: simple_hits,
-        hit_rate: simple_hits as f64 / case_count as f64,
-        mrr: simple_reciprocal_rank_sum / case_count as f64,
-        avg_answer_term_recall: 0.0,
-        avg_result_term_recall: simple_result_term_sum / case_count as f64,
-        latency_ms: summarize_latencies(&simple_latencies),
-        misses: simple_misses.into_iter().take(12).collect(),
+    let bm25f = BenchmarkSummary {
+        hits: bm25f_hits,
+        hit_rate: bm25f_hits as f64 / case_count as f64,
+        mrr: bm25f_reciprocal_rank_sum / case_count as f64,
+        avg_answer_term_recall: None,
+        avg_result_term_recall: bm25f_result_term_sum / case_count as f64,
+        avg_confidence: None,
+        latency_ms: summarize_latencies(&bm25f_latencies),
+        misses: bm25f_misses.into_iter().take(12).collect(),
     };
     let report_data = BenchmarkReport {
+        schema_version: 2,
+        engine_version: env!("CARGO_PKG_VERSION"),
+        platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         dataset: dataset_path.display().to_string(),
+        dataset_sha256: sha256_bytes(raw.as_bytes()),
+        corpus: CorpusSummary {
+            root: corpus_path.display().to_string(),
+            discovered_documents: discovered.len(),
+            indexed_documents: bm25f_index.document_count(),
+            bytes: corpus_bytes,
+            sha256: corpus_sha256,
+            discovery_ms,
+            baseline_index_build_ms: bm25f_index.build_ms,
+        },
         cases: cases.len(),
         top_k,
+        warmup_rounds,
+        repetitions,
         comparison: BenchmarkComparison {
-            hit_rate_delta: memento.hit_rate - simple_search.hit_rate,
-            mrr_delta: memento.mrr - simple_search.mrr,
-            answer_term_recall_delta: memento.avg_answer_term_recall
-                - simple_search.avg_answer_term_recall,
-            result_term_recall_delta: memento.avg_result_term_recall
-                - simple_search.avg_result_term_recall,
+            hit_rate_delta: memento.hit_rate - bm25f.hit_rate,
+            mrr_delta: memento.mrr - bm25f.mrr,
+            result_term_recall_delta: memento.avg_result_term_recall - bm25f.avg_result_term_recall,
             memento_only_hits,
-            simple_only_hits,
+            bm25f_only_hits,
         },
         memento,
-        simple_search,
+        bm25f,
         per_case,
     };
 
@@ -345,6 +484,10 @@ pub async fn run_benchmark(
 
     println!("benchmark report: {}", report_path.display());
     println!("cases: {}", report_data.cases);
+    println!(
+        "corpus: {} documents, {} bytes, sha256 {}",
+        report_data.corpus.indexed_documents, report_data.corpus.bytes, report_data.corpus.sha256
+    );
     println!(
         "memento hit@{}: {:.1}%",
         top_k,
@@ -359,27 +502,30 @@ pub async fn run_benchmark(
     );
     println!(
         "memento answer term recall: {:.3}",
-        report_data.memento.avg_answer_term_recall
+        report_data
+            .memento
+            .avg_answer_term_recall
+            .unwrap_or_default()
     );
     println!(
         "memento result term recall: {:.3}",
         report_data.memento.avg_result_term_recall
     );
     println!(
-        "simple hit@{}: {:.1}%",
+        "bm25f hit@{}: {:.1}%",
         top_k,
-        report_data.simple_search.hit_rate * 100.0
+        report_data.bm25f.hit_rate * 100.0
     );
-    println!("simple mrr: {:.3}", report_data.simple_search.mrr);
+    println!("bm25f mrr: {:.3}", report_data.bm25f.mrr);
     println!(
-        "simple latency: avg {:.1} ms, p50 {:.1} ms, p95 {:.1} ms",
-        report_data.simple_search.latency_ms.average,
-        report_data.simple_search.latency_ms.p50,
-        report_data.simple_search.latency_ms.p95
+        "bm25f latency: avg {:.1} ms, p50 {:.1} ms, p95 {:.1} ms",
+        report_data.bm25f.latency_ms.average,
+        report_data.bm25f.latency_ms.p50,
+        report_data.bm25f.latency_ms.p95
     );
     println!(
-        "simple result term recall: {:.3}",
-        report_data.simple_search.avg_result_term_recall
+        "bm25f result term recall: {:.3}",
+        report_data.bm25f.avg_result_term_recall
     );
     println!(
         "delta hit@{}: {:+.1}%",
@@ -389,6 +535,46 @@ pub async fn run_benchmark(
     println!("delta mrr: {:+.3}", report_data.comparison.mrr_delta);
 
     Ok(())
+}
+
+fn ranks_are_stable(ranks: &[Option<usize>]) -> bool {
+    ranks
+        .first()
+        .is_none_or(|first| ranks.iter().all(|rank| rank == first))
+}
+
+fn corpus_fingerprint(
+    root: &Path,
+    documents: &[libmemento::sync::discovery::DiscoveredDocument],
+) -> Result<(String, u64)> {
+    let mut hasher = Sha256::new();
+    let mut total_bytes = 0_u64;
+    for document in documents {
+        let relative = document.path.strip_prefix(root).unwrap_or(&document.path);
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        let contents = fs::read(&document.path)
+            .with_context(|| format!("Could not fingerprint {}", document.path.display()))?;
+        total_bytes = total_bytes.saturating_add(contents.len() as u64);
+        hasher.update((relative.len() as u64).to_le_bytes());
+        hasher.update(relative.as_bytes());
+        hasher.update((contents.len() as u64).to_le_bytes());
+        hasher.update(&contents);
+    }
+    Ok((hex_digest(hasher.finalize()), total_bytes))
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex_digest(hasher.finalize())
+}
+
+fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
+    bytes
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn summarize_latencies(values: &[f64]) -> LatencySummary {
@@ -494,7 +680,10 @@ fn build_query(title: &str, expected_terms: &[String]) -> String {
 }
 
 fn tokenize(text: &str) -> Vec<String> {
-    text.split(|c: char| !c.is_alphanumeric())
+    text.nfd()
+        .filter(|character| !is_combining_mark(*character))
+        .collect::<String>()
+        .split(|c: char| !c.is_alphanumeric())
         .filter(|token| !token.is_empty())
         .map(|token| token.to_lowercase())
         .collect()
@@ -529,6 +718,45 @@ fn is_generic_term(term: &str) -> bool {
             | "third"
             | "spent"
             | "about"
+            | "what"
+            | "when"
+            | "where"
+            | "which"
+            | "who"
+            | "why"
+            | "how"
+            | "does"
+            | "did"
+            | "say"
+            | "said"
+            | "with"
+            | "from"
+            | "that"
+            | "this"
+            | "there"
+            | "recorded"
+            | "qual"
+            | "quais"
+            | "quem"
+            | "quando"
+            | "onde"
+            | "como"
+            | "porque"
+            | "sobre"
+            | "disse"
+            | "esta"
+            | "esse"
+            | "essa"
+            | "aquela"
+            | "foi"
+            | "tem"
+            | "para"
+            | "pela"
+            | "pelo"
+            | "das"
+            | "dos"
+            | "uma"
+            | "com"
     )
 }
 
@@ -576,112 +804,6 @@ fn normalize_recall_text(text: &str) -> String {
     normalized.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn common_vault_root(cases: &[BenchmarkCase]) -> Result<PathBuf> {
-    let mut iter = cases.iter();
-    let first = iter
-        .next()
-        .context("Benchmark dataset does not contain any cases")?;
-    let mut prefix = PathBuf::from(&first.expected_path);
-    if prefix.is_file() {
-        prefix.pop();
-    }
-
-    for case in iter {
-        let mut candidate = PathBuf::from(&case.expected_path);
-        if candidate.is_file() {
-            candidate.pop();
-        }
-        while !candidate.starts_with(&prefix) {
-            if !prefix.pop() {
-                return Err(anyhow::anyhow!(
-                    "Could not infer common vault root from benchmark dataset"
-                ));
-            }
-        }
-    }
-
-    Ok(prefix)
-}
-
-fn load_simple_search_documents(cases: &[BenchmarkCase]) -> Result<Vec<SimpleSearchDocument>> {
-    let root = common_vault_root(cases)?;
-    let mut docs = Vec::new();
-    for entry in WalkDir::new(&root)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-    {
-        let path = entry.into_path();
-        if !path.is_file() || !is_markdown(&path) {
-            continue;
-        }
-        let Ok(contents) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let title = extract_title(&path, &contents);
-        docs.push(SimpleSearchDocument {
-            path: canonicalize_loose(&path.display().to_string()),
-            title_tokens: tokenize(&title),
-            path_tokens: tokenize(
-                &path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or_default()
-                    .replace(['-', '_'], " "),
-            ),
-            content_tokens: tokenize(&contents),
-            title,
-            content: contents,
-        });
-    }
-    Ok(docs)
-}
-
-fn simple_search<'a>(
-    documents: &'a [SimpleSearchDocument],
-    query: &str,
-    top_k: usize,
-) -> Vec<&'a SimpleSearchDocument> {
-    let mut query_terms = tokenize(query);
-    query_terms.retain(|term| term.len() >= 2 && !is_generic_term(term));
-    query_terms.sort();
-    query_terms.dedup();
-
-    let phrase = query_terms.join(" ");
-    let mut scored = documents
-        .iter()
-        .filter_map(|doc| {
-            let title_matches = query_terms
-                .iter()
-                .filter(|term| doc.title_tokens.contains(term))
-                .count() as f64;
-            let path_matches = query_terms
-                .iter()
-                .filter(|term| doc.path_tokens.contains(term))
-                .count() as f64;
-            let content_matches = query_terms
-                .iter()
-                .filter(|term| doc.content_tokens.contains(term))
-                .count() as f64;
-            let title_text = doc.title.to_lowercase();
-            let phrase_bonus = if !phrase.is_empty() && title_text.contains(&phrase) {
-                2.5
-            } else {
-                0.0
-            };
-            let score =
-                (title_matches * 3.0) + (path_matches * 2.0) + content_matches + phrase_bonus;
-            if score > 0.0 {
-                Some((score, doc))
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    scored.into_iter().take(top_k).map(|(_, doc)| doc).collect()
-}
-
 fn is_markdown(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|value| value.to_str()),
@@ -691,192 +813,11 @@ fn is_markdown(path: &Path) -> bool {
 
 fn expand_tilde(path: &str) -> PathBuf {
     if let Some(stripped) = path.strip_prefix("~/").or_else(|| path.strip_prefix(r"~\")) {
-        return home_dir().join(stripped);
+        return dirs::home_dir()
+            .expect("Could not determine home directory")
+            .join(stripped);
     }
     PathBuf::from(path)
-}
-
-fn home_dir() -> PathBuf {
-    dirs::home_dir().expect("Could not determine home directory")
-}
-
-fn data_dir() -> PathBuf {
-    std::env::var_os("MEMENTO_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".memento"))
-}
-
-fn pid_path() -> PathBuf {
-    data_dir().join("mementod.pid")
-}
-
-async fn ensure_daemon() -> Result<()> {
-    if connect().await.is_ok() {
-        return Ok(());
-    }
-
-    fs::create_dir_all(data_dir())?;
-    if !daemon_process_is_alive() {
-        start_daemon()?;
-    }
-
-    for _ in 0..120 {
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        if connect().await.is_ok() {
-            return Ok(());
-        }
-    }
-
-    connect().await.context("mementod did not start")?;
-    Ok(())
-}
-
-fn daemon_process_is_alive() -> bool {
-    let pid_file = pid_path();
-    if !pid_file.exists() {
-        return false;
-    }
-    if let Ok(pid_str) = fs::read_to_string(&pid_file) {
-        if let Ok(pid) = pid_str.trim().parse::<i32>() {
-            return process_is_alive(pid);
-        }
-    }
-    false
-}
-
-fn process_is_alive(pid: i32) -> bool {
-    if pid <= 0 {
-        return false;
-    }
-
-    #[cfg(unix)]
-    unsafe {
-        unsafe extern "C" {
-            fn kill(pid: i32, signal: i32) -> i32;
-        }
-        kill(pid, 0) == 0
-    }
-
-    #[cfg(windows)]
-    unsafe {
-        use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
-        use windows_sys::Win32::System::Threading::{
-            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-        };
-
-        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
-        if handle.is_null() {
-            return false;
-        }
-        let mut exit_code = 0_u32;
-        let result = GetExitCodeProcess(handle, &mut exit_code);
-        let _ = CloseHandle(handle);
-        result != 0 && exit_code == STILL_ACTIVE as u32
-    }
-}
-
-fn start_daemon() -> Result<()> {
-    let exe = which_mementod()?;
-
-    #[cfg(unix)]
-    Command::new(&exe)
-        .arg("--foreground")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("Failed to start mementod")?;
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-
-        Command::new(&exe)
-            .arg("--foreground")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
-            .spawn()
-            .context("Failed to start mementod")?;
-    }
-    Ok(())
-}
-
-fn which_mementod() -> Result<PathBuf> {
-    if let Ok(exe) = std::env::current_exe() {
-        let dir = exe.parent().unwrap_or(Path::new("."));
-        let candidate = dir.join(format!("mementod{}", std::env::consts::EXE_SUFFIX));
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    let local_target = PathBuf::from("target")
-        .join("debug")
-        .join(format!("mementod{}", std::env::consts::EXE_SUFFIX));
-    if local_target.exists() {
-        return Ok(local_target);
-    }
-    Ok(PathBuf::from(format!(
-        "mementod{}",
-        std::env::consts::EXE_SUFFIX
-    )))
-}
-
-#[cfg(unix)]
-async fn connect_stream() -> Result<UnixStream> {
-    let socket = memento_ipc::unix_socket_path(&data_dir());
-    UnixStream::connect(&socket)
-        .await
-        .with_context(|| format!("Cannot connect to mementod at {}", socket.display()))
-}
-
-#[cfg(windows)]
-async fn connect_stream() -> Result<NamedPipeClient> {
-    let pipe = memento_ipc::windows_pipe_name(&data_dir());
-    memento_ipc::connect_windows_pipe(&pipe)
-        .await
-        .with_context(|| format!("Cannot connect to mementod at {pipe}"))
-}
-
-async fn connect() -> Result<hyper::client::conn::http1::SendRequest<Full<Bytes>>> {
-    let stream = connect_stream().await?;
-
-    let io = TokioIo::new(stream);
-    let (sender, conn) = hyper::client::conn::http1::handshake(io)
-        .await
-        .context("HTTP handshake failed")?;
-
-    tokio::spawn(async move {
-        let _ = conn.await;
-    });
-
-    Ok(sender)
-}
-
-async fn post(path: &str, body: &str) -> Result<String> {
-    let mut sender = connect().await?;
-    let req = Request::builder()
-        .method("POST")
-        .uri(path)
-        .header("Host", "localhost")
-        .header("Content-Type", "application/json")
-        .body(Full::new(Bytes::from(body.to_string())))?;
-    let resp = sender.send_request(req).await?;
-    read_body(resp).await
-}
-
-async fn read_body(resp: hyper::Response<Incoming>) -> Result<String> {
-    let status = resp.status();
-    let body = resp.into_body().collect().await?.to_bytes();
-    let text = String::from_utf8_lossy(&body).to_string();
-    if !status.is_success() {
-        return Err(anyhow::anyhow!("HTTP {}: {}", status, text));
-    }
-    Ok(text)
 }
 
 fn canonicalize_loose(path: &str) -> String {
@@ -889,11 +830,10 @@ fn canonicalize_loose(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_query, common_vault_root, derive_keywords, extract_excerpt, extract_title,
-        looks_like_journal_title, process_is_alive, simple_search, summarize_latencies,
-        term_recall, BenchmarkCase, SimpleSearchDocument,
+        build_query, derive_keywords, extract_excerpt, extract_title, looks_like_journal_title,
+        runtime::process_is_alive, summarize_latencies, term_recall,
     };
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     #[test]
     fn title_uses_heading_first() {
@@ -955,57 +895,5 @@ mod tests {
         let expected = vec!["itau".to_string(), "1093".to_string()];
 
         assert_eq!(term_recall("Itaú converted 1,093 leads", &expected), 1.0);
-    }
-
-    #[test]
-    fn common_root_uses_shared_vault_prefix() {
-        let cases = vec![
-            BenchmarkCase {
-                id: "a".into(),
-                query: "q".into(),
-                expected_path: "/tmp/vault/memory/a.md".into(),
-                expected_title: "A".into(),
-                expected_terms: vec![],
-                excerpt: String::new(),
-            },
-            BenchmarkCase {
-                id: "b".into(),
-                query: "q".into(),
-                expected_path: "/tmp/vault/memory/nested/b.md".into(),
-                expected_title: "B".into(),
-                expected_terms: vec![],
-                excerpt: String::new(),
-            },
-        ];
-
-        assert_eq!(
-            common_vault_root(&cases).unwrap(),
-            PathBuf::from("/tmp/vault/memory")
-        );
-    }
-
-    #[test]
-    fn simple_search_prefers_title_match() {
-        let docs = vec![
-            SimpleSearchDocument {
-                path: "/tmp/a.md".into(),
-                title: "Jose Roberto IT Profile".into(),
-                title_tokens: vec!["jose".into(), "roberto".into(), "profile".into()],
-                path_tokens: vec!["jose".into(), "roberto".into(), "itprofile".into()],
-                content_tokens: vec!["focused".into(), "profile".into()],
-                content: "Focused profile".into(),
-            },
-            SimpleSearchDocument {
-                path: "/tmp/b.md".into(),
-                title: "Daily Note".into(),
-                title_tokens: vec!["daily".into(), "note".into()],
-                path_tokens: vec!["daily".into(), "note".into()],
-                content_tokens: vec!["jose".into(), "roberto".into(), "profile".into()],
-                content: "Jose Roberto profile mention".into(),
-            },
-        ];
-
-        let results = simple_search(&docs, "what does Jose Roberto IT Profile say?", 5);
-        assert_eq!(results.first().unwrap().path, "/tmp/a.md");
     }
 }
