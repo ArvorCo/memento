@@ -49,7 +49,9 @@ pub struct DaemonConfigFile {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct DaemonRuntimeConfig {
     pub data_dir: Option<String>,
+    pub transport: Option<String>,
     pub socket_path: Option<String>,
+    pub pipe_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

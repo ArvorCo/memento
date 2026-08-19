@@ -1,7 +1,7 @@
 //! mementod — Memento daemon
 //!
 //! Background service managing .memento files.
-//! Serves API on Unix socket (~/.memento/memento.sock) + optional HTTP.
+//! Serves the local API on a Unix socket or Windows named pipe, plus optional HTTP.
 
 use anyhow::Result;
 use clap::Parser;
@@ -63,10 +63,6 @@ fn data_dir(cli_override: Option<&PathBuf>) -> PathBuf {
     })
 }
 
-fn socket_path(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("memento.sock")
-}
-
 fn pid_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("mementod.pid")
 }
@@ -76,14 +72,14 @@ fn http_token_path(data_dir: &std::path::Path) -> PathBuf {
 }
 
 struct RuntimeFilesGuard {
-    socket_path: PathBuf,
+    endpoint_file: Option<PathBuf>,
     pid_path: PathBuf,
 }
 
 impl RuntimeFilesGuard {
-    fn new(socket_path: PathBuf, pid_path: PathBuf) -> Self {
+    fn new(endpoint_file: Option<PathBuf>, pid_path: PathBuf) -> Self {
         Self {
-            socket_path,
+            endpoint_file,
             pid_path,
         }
     }
@@ -91,7 +87,9 @@ impl RuntimeFilesGuard {
 
 impl Drop for RuntimeFilesGuard {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.socket_path);
+        if let Some(path) = &self.endpoint_file {
+            let _ = fs::remove_file(path);
+        }
         let _ = fs::remove_file(&self.pid_path);
     }
 }
@@ -163,13 +161,13 @@ async fn main() -> Result<()> {
     fs::create_dir_all(&dir)?;
 
     let pid_file = pid_path(&dir);
-    let sock = socket_path(&dir);
-    let _runtime_files = RuntimeFilesGuard::new(sock.clone(), pid_file.clone());
-
-    // Clean up stale socket
-    if sock.exists() {
-        fs::remove_file(&sock)?;
-    }
+    server::prepare_local_endpoint(&dir)?;
+    let local_listener = server::bind_local(&dir)?;
+    #[cfg(unix)]
+    let endpoint_file = Some(memento_ipc::unix_socket_path(&dir));
+    #[cfg(windows)]
+    let endpoint_file = None;
+    let _runtime_files = RuntimeFilesGuard::new(endpoint_file, pid_file.clone());
 
     // Publish the live PID before loading a potentially large memory store so a
     // second CLI invocation waits for this process instead of racing another
@@ -180,16 +178,14 @@ async fn main() -> Result<()> {
     let mgr = std::sync::Arc::new(manager::MementoManager::new(&dir)?);
 
     info!(
-        "mementod starting — socket: {}, data: {}",
-        sock.display(),
+        "mementod starting — local endpoint: {}, data: {}",
+        memento_ipc::endpoint_description(&dir),
         dir.display()
     );
 
     // Build router
     scheduler::start_scheduler(std::sync::Arc::clone(&mgr), dir.clone()).await?;
     let app = server::build_router(std::sync::Arc::clone(&mgr));
-    let unix_listener = server::bind_unix_socket(&sock)?;
-
     let http_listener = if let Some(port) = cli.http_port {
         let http_token = ensure_http_auth_token(&dir)?;
         let http_app = server::with_http_auth(app.clone(), http_token.clone().into());
@@ -208,7 +204,7 @@ async fn main() -> Result<()> {
     };
 
     // Start servers
-    let socket_handle = server::serve_unix_socket(app, unix_listener, &sock);
+    let local_handle = server::serve_local(app, local_listener);
 
     let http_handle = if let Some((http_app, listener, addr)) = http_listener {
         Some(server::serve_http(http_app, listener, addr))
@@ -218,9 +214,9 @@ async fn main() -> Result<()> {
 
     // Wait for shutdown signal
     tokio::select! {
-        result = socket_handle => {
+        result = local_handle => {
             if let Err(e) = result {
-                warn!("Socket server error: {e}");
+                warn!("Local server error: {e}");
             }
         }
         result = async { match http_handle { Some(h) => h.await, None => std::future::pending().await } } => {
@@ -237,6 +233,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 async fn shutdown_signal() {
     let ctrl_c = signal::ctrl_c();
     let mut term = signal::unix::signal(signal::unix::SignalKind::terminate())
@@ -246,6 +243,11 @@ async fn shutdown_signal() {
         _ = ctrl_c => {},
         _ = term.recv() => {},
     }
+}
+
+#[cfg(windows)]
+async fn shutdown_signal() {
+    let _ = signal::ctrl_c().await;
 }
 
 #[cfg(test)]
@@ -264,14 +266,14 @@ mod tests {
     #[test]
     fn runtime_files_guard_removes_runtime_artifacts_on_drop() {
         let temp = tempfile::tempdir().unwrap();
-        let socket_path = temp.path().join("memento.sock");
+        let socket_path = memento_ipc::unix_socket_path(temp.path());
         let pid_path = temp.path().join("mementod.pid");
 
         fs::write(&socket_path, "").unwrap();
         fs::write(&pid_path, "1234").unwrap();
 
         {
-            let _guard = RuntimeFilesGuard::new(socket_path.clone(), pid_path.clone());
+            let _guard = RuntimeFilesGuard::new(Some(socket_path.clone()), pid_path.clone());
         }
 
         assert!(!socket_path.exists());

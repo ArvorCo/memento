@@ -15,6 +15,7 @@ name = "memento"
 path = "src/main.rs"
 
 [dependencies]
+memento-ipc = { path = "../memento-ipc" }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive", "color"] }
 serde = { version = "1", features = ["derive"] }
@@ -27,6 +28,9 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
 toml = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tempfile = "3"

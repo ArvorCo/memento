@@ -10,7 +10,8 @@ release line.
 
 | Version | Supported |
 | --- | --- |
-| 0.1.x | yes |
+| 0.2.x | yes |
+| 0.1.x | no |
 | older | no |
 
 Pre-1.0 interfaces may evolve, but security fixes will not be intentionally held
@@ -43,7 +44,7 @@ fixed remediation SLA is promised at this stage.
 
 Safe defaults:
 
-- local Unix socket transport
+- local Unix socket or Windows named-pipe transport
 - no HTTP listener unless `--http-port` is explicit
 - loopback-only HTTP host by default
 - explicit `--allow-remote-http` for non-loopback binding

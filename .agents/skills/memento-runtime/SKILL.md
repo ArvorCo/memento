@@ -26,12 +26,21 @@ differs between processes.
 
 ## Bootstrap or repair installation
 
-Check the installation first:
+Identify the operating system, then check the installation first.
+
+macOS/Linux:
 
 ```bash
 command -v memento
 command -v mementod
 command -v memento-mcp
+memento --version
+```
+
+Windows PowerShell:
+
+```powershell
+Get-Command memento,mementod,memento-mcp -ErrorAction SilentlyContinue
 memento --version
 ```
 
@@ -42,15 +51,26 @@ contract:
 https://github.com/ArvorCo/memento/blob/main/AGENT_INSTALL.md
 ```
 
-When a Homebrew package already provides `memento-agent-install`, use it to add
-or repair the skill and host integration:
+When a package already provides `memento-agent-install`, use it to add or repair
+the skill and host integration.
+
+macOS/Linux:
 
 ```bash
 memento-agent-install --agent auto --integration auto --program skip
 ```
 
+Windows:
+
+```powershell
+memento-agent-install -Agent auto -Integration auto -Program skip
+```
+
 Do not pipe an unreviewed remote script directly into a shell. Clone or download
-the repository, inspect `scripts/install.sh`, and then execute it.
+the repository. Inspect `scripts/install.sh` on Unix or `scripts/install.ps1` on
+Windows, then execute the platform-native installer. Do not change a persistent
+PowerShell execution policy; use a process-scoped override for the inspected
+script.
 
 ## First-run sequence
 
@@ -66,6 +86,10 @@ memento status
 Initialization creates editable configuration under `~/.memento/config` by
 default. Use `MEMENTO_DATA_DIR` for an isolated store or non-default location,
 and apply the same value to the daemon, CLI, and MCP server.
+
+On Windows, pass `--preset windows` when the preset is explicit. Memento uses a
+local named pipe instead of a socket file. `MEMENTO_PIPE` is an advanced
+override and must match across daemon, CLI, and MCP.
 
 Continue with a narrow vertical test:
 
@@ -141,6 +165,12 @@ Use `memento-vault-sync` for PDFs, Office documents, databases, AI session
 exports, iCloud folders, Apple Notes, WhatsApp exports, or multiple Markdown
 trees.
 
+On Windows the installer exposes `memento-vault-sync.bat` from an isolated
+Python 3.12 environment. If it is missing, repair with
+`memento-agent-install -Program skip -Feeder always`; core Obsidian/folder sync
+does not depend on Python. Current DOCX, PPTX, XLSX, PDF, and notebook conversion
+does not require Microsoft Office.
+
 Inspect capabilities and generated configuration before running everything:
 
 ```bash
@@ -170,6 +200,9 @@ memento status
 Use an isolated `MEMENTO_DATA_DIR` to distinguish configuration or store damage
 from a binary/runtime failure. Do not delete the user's primary store as a
 diagnostic shortcut.
+
+On Windows, also inspect `$HOME\.memento\mementod.log`. There is no socket file
+to delete: the local endpoint is a named pipe derived from the data directory.
 
 ### Sync imported nothing
 

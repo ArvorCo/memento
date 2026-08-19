@@ -75,13 +75,14 @@ The core path has four steps:
 | Vault feeder | Markdown trees, PDFs, Office/e-book formats, CSV, TSV, JSON, notebooks |
 | Conversations | Codex, Claude, Droid, ChatGPT exports, WhatsApp exports |
 | Platform sources | Apple Notes and configured iCloud folders on macOS |
+| Runtime platforms | Native macOS, Linux, and Windows on arm64 and x86_64 |
 | Databases | Read-only SQLite, PostgreSQL, MySQL, and MariaDB queries |
 | Retrieval | Indexed lexical search, metadata, temporal signals, wikilink graph, spectral reranking |
 | Interfaces | Human CLI, compact JSON, local stdio MCP, optional authenticated HTTP |
 | Operations | Guided setup, diagnostics, incremental sync, scheduler, ignore rules |
 
 Not yet productized: Telegram ingestion, team/cloud sync as the primary mode,
-Windows named-pipe transport, and remotely hosted MCP.
+and remotely hosted MCP.
 
 ## Quick start
 
@@ -99,11 +100,24 @@ doctor, status, and one grounded query. Keep all memory data local.
 
 [Copy the complete agent installation prompt →](AGENT_INSTALL.md)
 
-For a manual Homebrew installation:
+For a manual installation on macOS:
 
 ```bash
 brew install ArvorCo/tap/memento
 ```
+
+On Windows, clone the repository, inspect the native installer, then run it
+from PowerShell 5.1 or newer:
+
+```powershell
+git clone --depth 1 https://github.com/ArvorCo/memento.git
+Set-Location memento
+Get-Content .\scripts\install.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+```
+
+Linux users can use the verified release installer or build from source. See
+the platform-specific commands in the installation guide.
 
 Prebuilt archives, source builds, and agent-host options are covered in the
 [installation guide](docs/INSTALLATION.md).

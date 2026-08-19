@@ -18,6 +18,7 @@ path = "src/main.rs"
 anyhow = "1"
 bytes = "1"
 dirs = "5"
+memento-ipc = { path = "../memento-ipc" }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import textwrap
+import tomllib
 import unittest
 from pathlib import Path
 
 from tools.vault_sync.config import load_config
+from tools.vault_sync.presets import render_preset
 
 
 class ConfigTests(unittest.TestCase):
@@ -13,12 +16,14 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
             config_path = root / "config.toml"
+            vault = json.dumps(str(root / "vault"))
+            state = json.dumps(str(root / "state"))
             config_path.write_text(
                 textwrap.dedent(
                     f"""
                     [vault]
-                    root = "{root / 'vault'}"
-                    state_dir = "{root / 'state'}"
+                    root = {vault}
+                    state_dir = {state}
 
                     [icloud_sync]
                     enabled = false
@@ -89,10 +94,23 @@ class ConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
             config = load_config(config_path)
-            self.assertTrue(str(config.session_imports["codex"].manifest).endswith("state-dir/codex_manifest.json"))
+            expected_manifest = (Path.home() / "state-dir/codex_manifest.json").resolve()
+            self.assertEqual(config.session_imports["codex"].manifest, expected_manifest)
             self.assertEqual(config.linking.default_project_prefix, "projects")
             self.assertEqual(config.session_imports["codex"].file_glob, "*.jsonl")
             self.assertEqual(config.session_imports["codex"].exclude_path_fragments, ["subagents"])
+
+    def test_windows_preset_escapes_absolute_paths_for_toml(self) -> None:
+        rendered = render_preset(
+            "windows",
+            vault_root=r"C:\Users\Example\MementoVault",
+            state_dir=r"C:\Users\Example\.memento\sync",
+        )
+
+        parsed = tomllib.loads(rendered)
+
+        self.assertEqual(parsed["vault"]["root"], r"C:\Users\Example\MementoVault")
+        self.assertEqual(parsed["vault"]["state_dir"], r"C:\Users\Example\.memento\sync")
 
     def test_load_config_parses_connector_sections(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

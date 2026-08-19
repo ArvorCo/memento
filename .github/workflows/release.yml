@@ -41,6 +41,10 @@ jobs:
             target: aarch64-unknown-linux-gnu
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -57,6 +61,7 @@ jobs:
       - name: Build core binaries
         run: cargo build --release --locked --target ${{ matrix.target }} -p memento-cli -p mementod -p memento-mcp
       - name: Package archive
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           version="${{ needs.validate.outputs.version }}"
@@ -69,19 +74,58 @@ jobs:
           cp tools/__init__.py dist/package/tools/
           cp -R tools/vault_sync dist/package/tools/
           mkdir -p dist/package/scripts
-          cp scripts/install.sh dist/package/scripts/
+          cp scripts/install.sh scripts/install.ps1 dist/package/scripts/
           mkdir -p dist/package/.agents/skills
           cp -R .agents/skills/memento-runtime dist/package/.agents/skills/
           cp README.md AGENT_INSTALL.md LICENSE-MIT LICENSE-APACHE dist/package/
           tar -C dist/package -czf "dist/${archive}" .
+      - name: Test Windows named-pipe runtime
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP "memento-release-runtime"
+          $vault = Join-Path $env:RUNNER_TEMP "memento-release-vault"
+          New-Item -ItemType Directory -Force -Path $runtime, $vault | Out-Null
+          Set-Content -LiteralPath (Join-Path $vault "release.md") -Value "# Release`nWindows release transport proof."
+          $env:MEMENTO_DATA_DIR = $runtime
+          $bin = Join-Path $env:GITHUB_WORKSPACE "target\${{ matrix.target }}\release"
+          Push-Location $env:RUNNER_TEMP
+          try {
+            & "$bin\memento.exe" init --preset windows --vault-root $vault
+            & "$bin\memento.exe" sync obsidian $vault --json
+            $result = & "$bin\memento.exe" query "Windows release transport proof" --output compact
+            if ($LASTEXITCODE -ne 0 -or $result -notmatch "release.md") { throw "Windows release smoke test failed" }
+          } finally {
+            Pop-Location
+            $pidPath = Join-Path $runtime "mementod.pid"
+            if (Test-Path $pidPath) { Stop-Process -Id ([int](Get-Content $pidPath)) -Force -ErrorAction SilentlyContinue }
+          }
+      - name: Package Windows archive
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $version = "${{ needs.validate.outputs.version }}"
+          $archive = "memento-v$version-${{ matrix.target }}.zip"
+          $package = Join-Path $PWD "dist\package"
+          $bin = Join-Path $PWD "target\${{ matrix.target }}\release"
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Copy-Item "$bin\memento.exe", "$bin\mementod.exe", "$bin\memento-mcp.exe" -Destination $package
+          New-Item -ItemType Directory -Force -Path "$package\tools", "$package\scripts", "$package\.agents\skills" | Out-Null
+          Copy-Item "tools\__init__.py" -Destination "$package\tools"
+          Copy-Item "tools\vault_sync" -Destination "$package\tools" -Recurse
+          Copy-Item "scripts\install.sh", "scripts\install.ps1" -Destination "$package\scripts"
+          Copy-Item ".agents\skills\memento-runtime" -Destination "$package\.agents\skills" -Recurse
+          Copy-Item "README.md", "AGENT_INSTALL.md", "LICENSE-MIT", "LICENSE-APACHE" -Destination $package
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [IO.Compression.ZipFile]::CreateFromDirectory($package, (Join-Path $PWD "dist\$archive"))
       - name: Attest archive provenance
         uses: actions/attest@v4
         with:
-          subject-path: dist/*.tar.gz
+          subject-path: dist/memento-v*
       - uses: actions/upload-artifact@v7
         with:
           name: memento-${{ matrix.target }}
-          path: dist/*.tar.gz
+          path: dist/memento-v*
           if-no-files-found: error
 
   publish:
@@ -100,7 +144,7 @@ jobs:
         shell: bash
         run: |
           cd dist
-          sha256sum -- *.tar.gz > SHA256SUMS
+          sha256sum -- *.tar.gz *.zip > SHA256SUMS
           cd ..
           version="${{ needs.validate.outputs.version }}"
           sha_macos_arm64="$(sha256sum "dist/memento-v${version}-aarch64-apple-darwin.tar.gz" | cut -d' ' -f1)"
@@ -119,6 +163,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             dist/*.tar.gz \
+            dist/*.zip \
             dist/SHA256SUMS \
             dist/memento.rb \
             --verify-tag \
@@ -146,3 +191,32 @@ jobs:
             args+=(-f "sha=$current_sha")
           fi
           gh api "${args[@]}"
+
+  verify-windows-installer:
+    needs: [validate, publish]
+    runs-on: windows-2025
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the published Windows release
+        shell: powershell
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "memento-published-install"
+          $env:MEMENTO_INSTALL_HOME = Join-Path $env:RUNNER_TEMP "memento-published-home"
+          & .\scripts\install.ps1 `
+            -Program release `
+            -Version "${{ needs.validate.outputs.version }}" `
+            -InstallRoot $root `
+            -Agent generic `
+            -Integration cli `
+            -Feeder never `
+            -SkipInit `
+            -NoPath
+          & "$root\bin\memento.exe" --version
+          & "$root\bin\mementod.exe" --version
+          & "$root\bin\memento-mcp.exe" --version
+          if (-not (Test-Path "$root\bin\memento-agent-install.cmd")) { throw "agent helper is missing" }
+          if (-not (Test-Path "$env:MEMENTO_INSTALL_HOME\.agents\skills\memento-runtime\SKILL.md")) {
+            throw "runtime skill is missing"
+          }

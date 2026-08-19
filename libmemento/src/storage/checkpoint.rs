@@ -440,12 +440,12 @@ impl CheckpointManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_checkpoint_roundtrip_metadata() {
         let matrix = SemanticMatrix::new(1000);
-        let temp_path = PathBuf::from("/tmp/test_checkpoint_metadata.bin");
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_path = temp_dir.path().join("test_checkpoint_metadata.bin");
 
         // Checkpoint
         checkpoint_matrix(&matrix, &temp_path).unwrap();
@@ -455,8 +455,5 @@ mod tests {
 
         // Verify metadata
         assert_eq!(restored.vocabulary_size(), matrix.vocabulary_size());
-
-        // Cleanup
-        let _ = std::fs::remove_file(temp_path);
     }
 }

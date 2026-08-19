@@ -10,7 +10,8 @@
 ## Model
 
 `memento-mcp` is a local MCP server. Its host communicates over `stdio`; the
-server communicates with `mementod` over the local Unix socket.
+server communicates with `mementod` over the platform's local transport: a Unix
+socket on macOS/Linux or a named pipe on Windows.
 
 ```mermaid
 sequenceDiagram
@@ -24,7 +25,7 @@ sequenceDiagram
 
     H->>M: initialize over stdio
     A->>M: memento_search_memory
-    M->>D: POST /query over Unix socket
+    M->>D: POST /query over local socket or named pipe
     D-->>M: answer + ranked evidence
     M-->>A: bounded excerpts + source paths
     opt Exact source needs more context
@@ -322,7 +323,7 @@ These are starting points, not protocol limits.
 
 ## Store selection
 
-The MCP client resolves transport in this order:
+On Unix, the MCP client resolves transport in this order:
 
 1. `MEMENTO_SOCKET`, when set
 2. `<MEMENTO_DATA_DIR>/memento.sock`, when the data directory is set
@@ -331,10 +332,14 @@ The MCP client resolves transport in this order:
 Prefer `MEMENTO_DATA_DIR` because it keeps CLI, daemon, and MCP aligned. Use
 `MEMENTO_SOCKET` only when transport is intentionally decoupled.
 
+On Windows, all three processes derive a private named pipe from the absolute
+`MEMENTO_DATA_DIR`. `MEMENTO_PIPE` can override that name for advanced testing;
+set the identical value for daemon, CLI, and MCP.
+
 ## Security properties and limits
 
 - MCP transport is local `stdio`.
-- Daemon transport is a local Unix socket by default.
+- Daemon transport is a local Unix socket or Windows named pipe by default.
 - Search inputs, result counts, and excerpts are bounded.
 - Document pages are Unicode-safe and bounded to 20,000 characters.
 - Document reads require an exact source already present in memory.

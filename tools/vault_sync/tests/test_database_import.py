@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
@@ -15,7 +16,7 @@ class DatabaseImportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
             database = root / "notes.db"
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute(
                     "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT, body TEXT, updated_at TEXT)"
                 )
@@ -25,7 +26,7 @@ class DatabaseImportTests(unittest.TestCase):
 
             first = import_database(vault, config)
             second = import_database(vault, config)
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute("UPDATE notes SET body = 'Changed body' WHERE id = 1")
             third = import_database(vault, config)
 
@@ -37,7 +38,7 @@ class DatabaseImportTests(unittest.TestCase):
             self.assertIn("Changed body", outputs[0].read_text(encoding="utf-8"))
             self.assertNotIn(str(database), outputs[0].read_text(encoding="utf-8"))
 
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute("DELETE FROM notes")
             fourth = import_database(vault, config)
             self.assertEqual(fourth.removed, 1)

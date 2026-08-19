@@ -14,10 +14,10 @@ workspace version.
 ```mermaid
 flowchart LR
     accTitle: Memento release pipeline
-    accDescr: Maintainers validate code, docs, benchmarks, and version metadata; push an annotated semantic-version tag; GitHub Actions builds four platform archives, attests them, creates checksums and a Homebrew formula, publishes the GitHub release, and optionally updates the tap.
+    accDescr: Maintainers validate code, docs, benchmarks, and version metadata; push an annotated semantic-version tag; GitHub Actions builds six platform archives, attests them, creates checksums and a Homebrew formula, publishes the GitHub release, and optionally updates the tap.
 
     prep["Version + changelog + validation"] --> tag["Annotated vX.Y.Z tag"]
-    tag --> matrix["4-target release build"]
+    tag --> matrix["6-target release build"]
     matrix --> attest["Artifact attestations"]
     matrix --> sums["SHA256SUMS"]
     sums --> formula["Checksum-pinned memento.rb"]
@@ -28,8 +28,9 @@ flowchart LR
     tap -->|no| attached["Formula remains attached"]
 ```
 
-Current artifacts are GitHub archives and a Homebrew formula. The workflow does
-not publish crates or Python packages to public registries.
+Current artifacts are macOS/Linux `.tar.gz` archives, Windows `.zip` archives,
+and a Homebrew formula. The workflow does not publish crates or Python packages
+to public registries.
 
 ## Version policy
 
@@ -236,6 +237,13 @@ gh attestation verify memento-v0.1.0-x86_64-unknown-linux-gnu.tar.gz \
 tar -tzf memento-v0.1.0-x86_64-unknown-linux-gnu.tar.gz | sort
 ```
 
+Windows:
+
+```powershell
+Expand-Archive .\memento-v0.1.0-x86_64-pc-windows-msvc.zip .\memento-release
+Get-ChildItem .\memento-release -Recurse
+```
+
 Ensure expected binaries, feeder source, README, and licenses are present and no
 unintended file appears.
 
@@ -245,6 +253,8 @@ Test at least:
 
 - current and previous macOS architecture when runners/hardware are available
 - Linux x86_64
+- Windows x64 and ARM64 release builds; run the native runtime smoke test on x64
+- PowerShell installer, checksum verification, user PATH, and `.cmd` wrappers
 - `memento init`, `doctor`, sync, learn, query
 - feeder `--help`, `capabilities`, and one fixture conversion
 - `memento-mcp --version` and MCP tool listing through a host
@@ -286,7 +296,7 @@ For a security defect, follow coordinated disclosure in
 
 ## Post-release checklist
 
-- [ ] GitHub release contains all four archives, `SHA256SUMS`, and `memento.rb`.
+- [ ] GitHub release contains all six archives, `SHA256SUMS`, and `memento.rb`.
 - [ ] Attestation verification succeeds for each target.
 - [ ] Tap formula matches the attached formula and checksums.
 - [ ] Homebrew install and service smoke tests pass.

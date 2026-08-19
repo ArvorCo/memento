@@ -50,7 +50,8 @@ is loaded on each feeder invocation.
 | Variable | Scope | Description |
 | --- | --- | --- |
 | `MEMENTO_DATA_DIR` | CLI, daemon, MCP | Replaces `~/.memento` as the runtime root |
-| `MEMENTO_SOCKET` | MCP only | Replaces `<data-dir>/memento.sock` for the MCP client |
+| `MEMENTO_SOCKET` | MCP on Unix | Replaces `<data-dir>/memento.sock` for the MCP client |
+| `MEMENTO_PIPE` | CLI, daemon, MCP on Windows | Overrides the derived local named-pipe name |
 | `MEMENTO_HTTP_TOKEN` | Daemon HTTP | Supplies the bearer token without reading/writing the token file |
 | `MEMENTO_VAULT_SYNC_CONFIG` | Feeder | Selects feeder TOML when `--config` is absent |
 | `MEMENTO_REPO_ROOT` | Scheduler | Helps resolve a source-checkout feeder runner |
@@ -67,8 +68,8 @@ memento-mcp --version
 ```
 
 Setting only `mementod --data-dir` does not redirect the CLI. The CLI derives
-its socket from `MEMENTO_DATA_DIR`, so prefer the shared environment variable
-for an isolated stack.
+its Unix socket or Windows named pipe from `MEMENTO_DATA_DIR`, so prefer the
+shared environment variable for an isolated stack.
 
 ## `daemon.toml`
 
@@ -77,6 +78,7 @@ A generated file looks like this:
 ```toml
 [daemon]
 data_dir = "/home/user/.memento"
+transport = "unix"
 socket_path = "/home/user/.memento/memento.sock"
 http_enabled = false
 http_host = "127.0.0.1"
@@ -107,10 +109,20 @@ interval = "8h"
 
 ### `[daemon]`
 
-`data_dir` and `socket_path` are validated by `memento doctor` and document the
-generated layout. In the current release, process selection is controlled by
-`MEMENTO_DATA_DIR` or `mementod --data-dir`, and the socket is
-`<data-dir>/memento.sock`.
+`data_dir`, `transport`, and the platform endpoint are validated by `memento
+doctor` and document the generated layout. Unix uses `transport = "unix"` with
+`socket_path = "<data-dir>/memento.sock"`. Windows generates:
+
+```toml
+[daemon]
+data_dir = "C:\\Users\\me\\.memento"
+transport = "named_pipe"
+pipe_name = "\\\\.\\pipe\\memento-0123456789abcdef"
+```
+
+The actual suffix is a stable hash of the absolute data-directory path. Process
+selection is controlled by `MEMENTO_DATA_DIR` or `mementod --data-dir`; use
+`MEMENTO_PIPE` only for deliberate low-level transport overrides.
 
 The generated `http_*` keys are reserved metadata in 0.1.x; they do not enable
 HTTP. Use explicit `mementod` flags described under
@@ -448,7 +460,8 @@ curl -H "Authorization: Bearer $token" \
 ```
 
 > [!WARNING]
-> A memory store can contain highly sensitive material. Prefer the Unix socket.
+> A memory store can contain highly sensitive material. Prefer the platform's
+> private local transport: a Unix socket on macOS/Linux or named pipe on Windows.
 > `--allow-remote-http` is an explicit escape hatch, not a deployment
 > recommendation.
 

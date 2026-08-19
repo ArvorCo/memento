@@ -5,6 +5,24 @@ All notable changes to Memento are documented here. The project follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-19
+
+### Added
+
+- native Windows x64 and ARM64 runtime support using private local named pipes
+- checksum-verifying PowerShell installer with per-user PATH, agent skill, MCP,
+  optional Python feeder, and WinGet-assisted dependency setup
+- Windows CI, installer integration tests, release ZIPs, and named-pipe
+  ingest/query smoke tests
+- native DOCX, PPTX, XLSX, and Jupyter notebook conversion without requiring
+  Microsoft Office or Pandoc
+
+### Changed
+
+- daemon, CLI, and MCP now share a platform-neutral local IPC contract
+- release automation publishes six native targets across macOS, Linux, and
+  Windows
+
 ## [0.1.1] - 2026-08-17
 
 ### Fixed
@@ -66,6 +84,7 @@ All notable changes to Memento are documented here. The project follows
 - optional HTTP is loopback-only unless remote access is explicitly allowed
 - HTTP requests require the generated bearer token outside the health endpoint
 
-[Unreleased]: https://github.com/ArvorCo/memento/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ArvorCo/memento/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ArvorCo/memento/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ArvorCo/memento/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ArvorCo/memento/releases/tag/v0.1.0

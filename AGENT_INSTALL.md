@@ -64,7 +64,10 @@ user selected.
 
 ### 2. Inspect the installer before execution
 
-Clone a shallow, temporary checkout and inspect the script:
+Clone a shallow, temporary checkout and inspect the installer for the current
+operating system.
+
+macOS and Linux:
 
 ```bash
 memento_checkout="$(mktemp -d "${TMPDIR:-/tmp}/memento-bootstrap.XXXXXX")"
@@ -76,6 +79,19 @@ scripts/install.sh --help
 
 Do not use `curl ... | sh`. The checked-out script is auditable, versioned, and
 can copy the canonical skill bundled beside it.
+
+Windows PowerShell:
+
+```powershell
+$checkout = Join-Path $env:TEMP ("memento-bootstrap-" + [Guid]::NewGuid())
+git clone --depth 1 https://github.com/ArvorCo/memento.git $checkout
+Set-Location $checkout
+Get-Content .\scripts\install.ps1
+Get-Help .\scripts\install.ps1 -Detailed
+```
+
+Do not change the machine-wide PowerShell execution policy. A checked-out,
+reviewed script can be run with a process-scoped `-ExecutionPolicy Bypass`.
 
 ### 3. Run one installation command
 
@@ -118,6 +134,22 @@ scripts/install.sh \
   --scope user \
   --vault "/absolute/path/to/vault"
 ```
+
+On Windows, use the equivalent native parameters:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\install.ps1 `
+  -Agent codex `
+  -Integration mcp `
+  -Scope user `
+  -Vault "C:\Users\me\Documents\MyVault"
+```
+
+The PowerShell installer supports `-Program auto|release|source|skip`,
+`-Feeder auto|always|never`, `-InstallConverters`, `-SkipInit`, `-NoPath`, and
+`-DryRun`. With `-Feeder always`, it may use WinGet to install Python 3.12;
+`-InstallConverters` may use WinGet to install Pandoc.
 
 Use `--program skip` when the three core binaries are already installed. Use
 `--skip-init` when only repairing skill or MCP registration. Run `--dry-run`
@@ -213,14 +245,17 @@ at project scope. Its agent policies still control which tools are visible.
 
 | `--program` | Behavior |
 | --- | --- |
-| `auto` | Preserve existing binaries; otherwise prefer Homebrew, then a verified release, then source |
+| `auto` | Preserve existing binaries; otherwise use Homebrew on Unix when available or a verified release on Windows |
 | `brew` | Install `arvorco/tap/memento` |
 | `release` | Download the matching GitHub archive and verify `SHA256SUMS` |
 | `source` | Build the three Rust binaries from the checked-out repository |
 | `skip` | Install only skill/integration; require existing binaries |
 
-Supported prebuilt targets are macOS and Linux on arm64 and x86_64. Native
-Windows daemon transport is not yet a supported release target.
+Supported prebuilt targets are macOS, Linux, and Windows on arm64 and x86_64.
+Unix releases use `.tar.gz`; Windows releases use `.zip`. Windows clients reach
+the daemon through a local named pipe derived from `MEMENTO_DATA_DIR`.
+The Windows installer intentionally omits `brew`; its `auto` mode selects an
+existing installation or the verified native release.
 
 ## Integration behavior
 
@@ -236,10 +271,17 @@ installer forwards the identical `MEMENTO_DATA_DIR` to initialization and MCP.
 
 ## Package-installed repair command
 
-Homebrew installs a reusable helper:
+Homebrew and the Windows package install a reusable helper:
 
 ```bash
 memento-agent-install --agent auto --integration auto --program skip
+```
+
+On Windows the helper is `memento-agent-install.cmd` and accepts PowerShell
+installer parameters:
+
+```powershell
+memento-agent-install -Agent auto -Integration auto -Program skip
 ```
 
 Use it after adding a new agent host or repairing configuration. Add `--vault`

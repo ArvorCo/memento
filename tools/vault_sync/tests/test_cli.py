@@ -53,16 +53,20 @@ class VaultSyncCliTests(unittest.TestCase):
             )
 
             config = root / "config.toml"
+            vault_value = json.dumps(str(vault))
+            state_value = json.dumps(str(state))
+            workspace_value = json.dumps(str(workspace))
+            sessions_value = json.dumps(str(sessions / "codex"))
             config.write_text(
                 textwrap.dedent(
                     f"""
                     [vault]
-                    root = "{vault}"
-                    state_dir = "{state}"
+                    root = {vault_value}
+                    state_dir = {state_value}
 
                     [[markdown_sync.roots]]
                     name = "workspace"
-                    source = "{workspace}"
+                    source = {workspace_value}
                     destination = "projects"
                     include_extensions = [".md"]
                     exclude_dirs = [".git"]
@@ -77,7 +81,7 @@ class VaultSyncCliTests(unittest.TestCase):
 
                     [session_import.codex]
                     enabled = true
-                    source = "{sessions / "codex"}"
+                    source = {sessions_value}
                     destination = "converted/codex"
                     manifest = "codex_manifest.json"
                     label = "Codex"
