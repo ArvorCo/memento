@@ -83,8 +83,13 @@ jobs:
                 -PassThru `
                 -WindowStyle Hidden
             }
-            $clients | Wait-Process
+            $deadline = [DateTime]::UtcNow.AddSeconds(30)
             foreach ($client in $clients) {
+              $remaining = [Math]::Max(1, [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+              if (-not $client.WaitForExit($remaining)) {
+                $client.Kill()
+                throw "concurrent named-pipe client $($client.Id) exceeded 30 seconds"
+              }
               if ($client.ExitCode -ne 0) { throw "concurrent named-pipe client failed with $($client.ExitCode)" }
             }
           } finally {

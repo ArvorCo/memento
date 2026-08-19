@@ -37,7 +37,10 @@ pub async fn connect_windows_pipe(
     use tokio::net::windows::named_pipe::ClientOptions;
 
     const ERROR_PIPE_BUSY: i32 = 231;
-    const ATTEMPTS: usize = 40;
+    // A burst of local clients may briefly occupy every server instance while
+    // the daemon accepts and replaces them. Keep retrying long enough for a
+    // busy CPU-only machine without adding latency to the normal path.
+    const ATTEMPTS: usize = 200;
 
     for attempt in 0..ATTEMPTS {
         match ClientOptions::new().open(endpoint) {
