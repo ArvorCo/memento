@@ -165,11 +165,34 @@ pub(super) fn chunk_belongs_to_source(
         SourceType::Codex => chunk.source_path.starts_with("codex://"),
         SourceType::File => chunk.source_path == source_key,
         SourceType::Folder | SourceType::Obsidian => {
-            chunk.source_path == source_key
-                || chunk.source_path.starts_with(&format!("{source_key}/"))
+            local_path_is_within(&chunk.source_path, source_key)
         }
         SourceType::Url => false,
     }
+}
+
+#[cfg(unix)]
+fn local_path_is_within(candidate: &str, root: &str) -> bool {
+    Path::new(candidate).starts_with(Path::new(root))
+}
+
+#[cfg(windows)]
+fn local_path_is_within(candidate: &str, root: &str) -> bool {
+    fn key(value: &str) -> String {
+        let mut normalized = value.replace('\\', "/").to_ascii_lowercase();
+        while normalized.len() > 1 && normalized.ends_with('/') {
+            normalized.pop();
+        }
+        normalized
+    }
+
+    let candidate = key(candidate);
+    let root = key(root);
+    candidate == root
+        || (root == "/" && candidate.starts_with('/'))
+        || candidate
+            .strip_prefix(&root)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 pub(super) fn source_record_matches(
@@ -547,6 +570,32 @@ impl MementoManager {
                 let _ = self.save_active_operation(&checkpoint);
                 Err(error)
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_path_is_within;
+
+    #[test]
+    fn local_source_membership_respects_path_boundaries() {
+        #[cfg(unix)]
+        {
+            assert!(local_path_is_within("/vault/nested/note.md", "/vault"));
+            assert!(!local_path_is_within("/vault-copy/note.md", "/vault"));
+        }
+
+        #[cfg(windows)]
+        {
+            assert!(local_path_is_within(
+                r"C:\Users\Example\Vault\nested\note.md",
+                r"c:/users/example/vault/"
+            ));
+            assert!(!local_path_is_within(
+                r"C:\Users\Example\Vault-copy\note.md",
+                r"C:\Users\Example\Vault"
+            ));
         }
     }
 }
