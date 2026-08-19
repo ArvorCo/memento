@@ -326,11 +326,23 @@ def render_preset(
 ) -> str:
     template = PRESET_TEMPLATES[preset_name]
     rendered = template.format(
-        vault_root=vault_root or default_vault_root(preset_name),
-        state_dir=state_dir or default_state_dir(preset_name),
+        vault_root=_toml_string_content(vault_root or default_vault_root(preset_name)),
+        state_dir=_toml_string_content(state_dir or default_state_dir(preset_name)),
     )
     home = "${USERPROFILE}" if preset_name == "windows" else "${HOME}"
     return rendered + OPTIONAL_IMPORTS.replace("__HOME__", home)
+
+
+def _toml_string_content(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\b", "\\b")
+        .replace("\t", "\\t")
+        .replace("\n", "\\n")
+        .replace("\f", "\\f")
+        .replace("\r", "\\r")
+    )
 
 
 def write_preset(

@@ -34,7 +34,10 @@ class WikiLinkerTests(unittest.TestCase):
             self.assertTrue((vault / "_memento.md").exists())
             self.assertTrue((project / "_memento_hub.md").exists())
             self.assertTrue((vault / "_memento/topics/launch.md").exists())
-            self.assertIn("[[projects/alpha/plan|Launch Plan]]", (project / "_memento_hub.md").read_text())
+            self.assertIn(
+                "[[projects/alpha/plan|Launch Plan]]",
+                (project / "_memento_hub.md").read_text(encoding="utf-8"),
+            )
             self.assertEqual(plan_after_first.count(NAV_START), 1)
             self.assertEqual(plan_after_first, plan_after_second)
             self.assertEqual(second.navigation_updated, 0)
@@ -60,9 +63,7 @@ class WikiLinkerTests(unittest.TestCase):
             nested = vault / "area/nested"
             nested.mkdir(parents=True)
             for name in ("one", "two"):
-                (nested / f"{name}.md").write_text(
-                    f"---\ntags: [shared]\n---\n# {name.title()}\n", encoding="utf-8"
-                )
+                (nested / f"{name}.md").write_text(f"---\ntags: [shared]\n---\n# {name.title()}\n", encoding="utf-8")
             config = LinkingConfig(
                 enabled=True,
                 default_project_prefix="projects",
@@ -73,6 +74,9 @@ class WikiLinkerTests(unittest.TestCase):
 
             link_vault(VaultConfig(vault, root / "state"), config)
 
-            self.assertIn("[[home|← Parent hub]]", (vault / "area/index.md").read_text())
-            self.assertIn("[[area/index|← Parent hub]]", (nested / "index.md").read_text())
-            self.assertIn("[[home|← Memento]]", (vault / "_memento/topics/shared.md").read_text())
+            self.assertIn("[[home|← Parent hub]]", (vault / "area/index.md").read_text(encoding="utf-8"))
+            self.assertIn("[[area/index|← Parent hub]]", (nested / "index.md").read_text(encoding="utf-8"))
+            self.assertIn(
+                "[[home|← Memento]]",
+                (vault / "_memento/topics/shared.md").read_text(encoding="utf-8"),
+            )
