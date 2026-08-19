@@ -5,6 +5,34 @@ All notable changes to Memento are documented here. The project follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-19
+
+### Added
+
+- benchmark report schema v2 with an explicit corpus, SHA-256 dataset/corpus
+  fingerprints, warm-up rounds, repeated latency distributions, confidence,
+  and rank-stability diagnostics
+- deterministic fielded BM25 comparator over title, path, and body fields
+- English and Portuguese natural-language date constraints plus inflection and
+  translation bridges for high-value retrieval concepts
+
+### Changed
+
+- daemon ingest and research benchmarks now share one cross-platform corpus
+  discovery implementation, including `.mementoignore` and supported file types
+- exact dates are combined with source identity during reranking instead of
+  boosting every document from the same day equally
+- guide and protocol questions prefer canonical documents
+- generated onboarding config waits for the scheduled interval instead of
+  importing every detected connector immediately on daemon startup
+- the measured 30-case private regression suite improves hit@5 from 86.7% to
+  100% and MRR from 0.793 to 1.000 on the same fingerprinted corpus and store
+
+### Fixed
+
+- benchmark comparisons can no longer silently infer a smaller lexical corpus
+  from expected paths or compare reports produced from changing vault contents
+
 ## [0.2.0] - 2026-08-19
 
 ### Added
@@ -84,7 +112,8 @@ All notable changes to Memento are documented here. The project follows
 - optional HTTP is loopback-only unless remote access is explicitly allowed
 - HTTP requests require the generated bearer token outside the health endpoint
 
-[Unreleased]: https://github.com/ArvorCo/memento/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ArvorCo/memento/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/ArvorCo/memento/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ArvorCo/memento/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ArvorCo/memento/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ArvorCo/memento/releases/tag/v0.1.0

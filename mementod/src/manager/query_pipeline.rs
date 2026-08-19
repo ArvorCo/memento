@@ -39,7 +39,8 @@ impl MementoManager {
         let state = self.state.read().await;
         let query_mode = detect_query_mode(&req.query);
         let recall_intent = has_recall_intent(&req.query);
-        let has_explicit_date = parse_date_tokens(&req.query).is_some();
+        let query_date = parse_date_constraint(&req.query);
+        let has_explicit_date = query_date.is_some();
         let mut ranking_query_terms = tokenize_folded_text(&req.query)
             .into_iter()
             .filter(|term| term.len() >= 2 && !is_low_signal_query_term(term))
@@ -287,8 +288,13 @@ impl MementoManager {
                 let doc_id = rankings.first().map(|ranking| ranking.doc_id).unwrap_or(0);
                 let best_chunk = rankings.first().map(|ranking| &state.chunks[ranking.idx]);
                 let temporal = best_chunk
-                    .map(|chunk| temporal_match_score(&req.query, chunk, &documents))
+                    .map(|chunk| temporal_match_score(query_date, chunk, &documents))
                     .unwrap_or(0.0);
+                let temporal_identity = if has_explicit_date {
+                    temporal_identity_score(temporal, metadata, exactness, entity)
+                } else {
+                    0.0
+                };
                 let episodic = best_chunk
                     .map(|chunk| episodic_memory_score(chunk, &documents))
                     .unwrap_or(0.0);
@@ -387,12 +393,14 @@ impl MementoManager {
                     QueryMode::DocumentLookup => {
                         (embedding * 0.06)
                             + (temporal * if has_explicit_date { 0.40 } else { 0.02 })
+                            + temporal_identity
                             + class_bias.max(0.0)
                             + freshness_bias
                     }
                     QueryMode::EpisodicRecall => {
                         (embedding * 0.15)
                             + (temporal * if has_explicit_date { 0.40 } else { 0.12 })
+                            + temporal_identity
                             + recall_bias
                             + class_bias
                             + freshness_bias
@@ -400,6 +408,7 @@ impl MementoManager {
                     QueryMode::ConceptSearch => {
                         (embedding * 0.18)
                             + (temporal * if has_explicit_date { 0.40 } else { 0.05 })
+                            + temporal_identity
                             + class_bias
                             + freshness_bias
                     }

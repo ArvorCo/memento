@@ -197,8 +197,11 @@ memento learn
 ```
 
 The default scheduler is configured during initialization when a feeder runner
-is available. If you use Homebrew services, restart the service after changing
-daemon configuration:
+is available. Its first automatic pass waits for the configured interval, so
+onboarding cannot unexpectedly import every detected connector during daemon
+startup. Run `memento-vault-sync ... run-all` when you want an immediate first
+pass. If you use Homebrew services, restart the service after changing daemon
+configuration:
 
 ```bash
 brew services restart memento

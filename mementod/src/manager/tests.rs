@@ -8,15 +8,6 @@ fn test_tokenize_text_normalizes_punctuation() {
 }
 
 #[test]
-fn test_should_skip_indexing_dir_filters_dependency_and_build_junk() {
-    assert!(should_skip_indexing_dir("node_modules"));
-    assert!(should_skip_indexing_dir("target"));
-    assert!(should_skip_indexing_dir(".obsidian"));
-    assert!(should_skip_indexing_dir(".entire"));
-    assert!(!should_skip_indexing_dir("memory"));
-}
-
-#[test]
 fn test_chunker_profile_scales_with_file_size() {
     assert_eq!(
         chunker_profile_for_file_size(8 * 1024),

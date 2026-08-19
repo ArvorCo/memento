@@ -25,12 +25,9 @@ use self::runtime_state::{
     cosine_similarity_f32, embedding_state_from_segment, engine_state_from_memento,
     engine_state_from_recovery_snapshot, memento_from_runtime_segments, rebuild_state_from_chunks,
 };
-#[cfg(test)]
-use self::source_sync::should_skip_indexing_dir;
 use self::source_sync::{
     chunk_belongs_to_source, source_key, source_record_matches, source_type_from_str,
 };
-use crate::ignore_rules::IgnoreRules;
 #[cfg(test)]
 use crate::memory_classification::{classification_rules_path, ClassificationRule};
 use crate::memory_classification::{
@@ -43,13 +40,13 @@ use crate::query_scoring::{
     aggregate_memory_score, contextual_freshness_score, episodic_memory_score,
     evergreen_memory_score, metadata_exact_match_bonus, metadata_exactness_score,
     metadata_overlap_score, retrieval_confidence_score, session_note_score,
-    source_compactness_score, temporal_match_score,
+    source_compactness_score, temporal_identity_score, temporal_match_score,
 };
 use crate::recovery_snapshot::{RecoverySnapshot, RecoverySnapshotStore};
 use crate::scheduler::{ScheduledJobState, SchedulerSnapshot};
 use crate::text_utils::{
     detect_query_mode, has_recall_intent, is_low_signal_query_term, lexical_query_alternatives,
-    parse_date_tokens, tokenize_folded_text, tokenize_text, QueryMode,
+    parse_date_constraint, parse_date_tokens, tokenize_folded_text, tokenize_text, QueryMode,
 };
 use anyhow::Result;
 use libmemento::chunker::smart::SmartChunker;

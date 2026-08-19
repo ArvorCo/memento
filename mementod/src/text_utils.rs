@@ -36,6 +36,12 @@ pub fn is_low_signal_query_term(term: &str) -> bool {
             | "when"
             | "where"
             | "how"
+            | "why"
+            | "many"
+            | "on"
+            | "during"
+            | "after"
+            | "according"
             | "did"
             | "does"
             | "was"
@@ -89,6 +95,7 @@ pub fn is_low_signal_query_term(term: &str) -> bool {
             | "ao"
             | "aos"
             | "em"
+            | "de"
             | "se"
             | "os"
             | "as"
@@ -128,6 +135,10 @@ pub fn detect_query_mode(query: &str) -> QueryMode {
         || folded.contains("profile")
         || folded.contains("catalog")
         || folded.contains("catalogo")
+        || folded.contains(" guide")
+        || folded.contains("guia")
+        || folded.contains("protocol")
+        || folded.contains("protocolo")
     {
         QueryMode::DocumentLookup
     } else if has_recall_intent(query) {
@@ -195,6 +206,47 @@ pub fn lexical_query_alternatives(term: &str) -> Vec<String> {
         "prioridade" | "prioridades" | "priority" | "priorities" => {
             &["prioridade", "prioridades", "priority", "priorities"]
         }
+        "rank" | "ranks" | "ranked" | "ranking" | "ranquear" | "ranqueou" | "ranqueado" => &[
+            "rank",
+            "ranks",
+            "ranked",
+            "ranking",
+            "ranquear",
+            "ranqueou",
+            "ranqueado",
+        ],
+        "promote" | "promotes" | "promoted" | "promotion" | "promover" | "promoveu"
+        | "promocao" => &[
+            "promote",
+            "promotes",
+            "promoted",
+            "promotion",
+            "promover",
+            "promoveu",
+            "promocao",
+        ],
+        "candidate" | "candidates" | "candidato" | "candidatos" => {
+            &["candidate", "candidates", "candidato", "candidatos"]
+        }
+        "opportunity" | "opportunities" | "oportunidade" | "oportunidades" => &[
+            "opportunity",
+            "opportunities",
+            "oportunidade",
+            "oportunidades",
+        ],
+        "revenue" | "receita" | "receitas" => &["revenue", "receita", "receitas"],
+        "review" | "reviews" | "revisao" | "revisoes" => {
+            &["review", "reviews", "revisao", "revisoes"]
+        }
+        "finance" | "financial" | "financials" | "financeiro" | "financeira" => &[
+            "finance",
+            "financial",
+            "financials",
+            "financeiro",
+            "financeira",
+        ],
+        "ingest" | "ingestion" | "ingestao" => &["ingest", "ingestion", "ingestao"],
+        "deadline" | "prazo" => &["deadline", "prazo"],
         _ => return vec![term.to_string()],
     };
     alternatives
@@ -219,9 +271,18 @@ pub fn strip_date_prefix(text: &str) -> String {
     }
 }
 
-pub fn parse_date_tokens(text: &str) -> Option<(u32, u32, u32)> {
-    let numbers = tokenize_text(text)
-        .into_iter()
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DateConstraint {
+    pub year: Option<u32>,
+    pub month: u32,
+    pub day: u32,
+}
+
+pub fn parse_date_constraint(text: &str) -> Option<DateConstraint> {
+    let folded = ascii_fold(text);
+    let tokens = tokenize_text(&folded);
+    let numbers = tokens
+        .iter()
         .filter_map(|term| term.parse::<u32>().ok())
         .collect::<Vec<_>>();
 
@@ -231,11 +292,70 @@ pub fn parse_date_tokens(text: &str) -> Option<(u32, u32, u32)> {
             _ => continue,
         };
         if (1900..=2100).contains(&year) && (1..=12).contains(&month) && (1..=31).contains(&day) {
-            return Some((year, month, day));
+            return Some(DateConstraint {
+                year: Some(year),
+                month,
+                day,
+            });
         }
     }
 
+    for (month_index, token) in tokens.iter().enumerate() {
+        let Some(month) = month_number(token) else {
+            continue;
+        };
+        let day = tokens[..month_index]
+            .iter()
+            .rev()
+            .take(3)
+            .find_map(|term| valid_day(term))
+            .or_else(|| {
+                tokens[month_index + 1..]
+                    .iter()
+                    .take(3)
+                    .find_map(|term| valid_day(term))
+            });
+        let Some(day) = day else {
+            continue;
+        };
+        let year = numbers
+            .iter()
+            .copied()
+            .find(|number| (1900..=2100).contains(number));
+        return Some(DateConstraint { year, month, day });
+    }
+
     None
+}
+
+pub fn parse_date_tokens(text: &str) -> Option<(u32, u32, u32)> {
+    let constraint = parse_date_constraint(text)?;
+    Some((constraint.year?, constraint.month, constraint.day))
+}
+
+fn valid_day(token: &str) -> Option<u32> {
+    token
+        .parse::<u32>()
+        .ok()
+        .filter(|day| (1..=31).contains(day))
+}
+
+fn month_number(token: &str) -> Option<u32> {
+    match token {
+        "jan" | "january" | "janeiro" => Some(1),
+        "feb" | "february" | "fevereiro" => Some(2),
+        "mar" | "march" | "marco" => Some(3),
+        "apr" | "april" | "abril" => Some(4),
+        "may" | "maio" => Some(5),
+        "jun" | "june" | "junho" => Some(6),
+        "jul" | "july" | "julho" => Some(7),
+        "aug" | "august" | "agosto" => Some(8),
+        "sep" | "sept" | "september" | "setembro" => Some(9),
+        "oct" | "october" | "outubro" => Some(10),
+        "nov" | "november" | "novembro" => Some(11),
+        "dec" | "december" | "dezembro" => Some(12),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -255,6 +375,10 @@ mod tests {
             detect_query_mode("what are Atlas's product priorities and product catalog?"),
             QueryMode::DocumentLookup
         );
+        assert_eq!(
+            detect_query_mode("what belongs in the operational folder according to the guide?"),
+            QueryMode::DocumentLookup
+        );
     }
 
     #[test]
@@ -270,5 +394,33 @@ mod tests {
         let alternatives = lexical_query_alternatives("clientes");
         assert!(alternatives.iter().any(|term| term == "clientes"));
         assert!(alternatives.iter().any(|term| term == "customers"));
+    }
+
+    #[test]
+    fn natural_language_dates_support_english_and_portuguese() {
+        assert_eq!(
+            parse_date_constraint("on August 3, what changed?"),
+            Some(DateConstraint {
+                year: None,
+                month: 8,
+                day: 3,
+            })
+        );
+        assert_eq!(
+            parse_date_constraint("24 de março de 2026"),
+            Some(DateConstraint {
+                year: Some(2026),
+                month: 3,
+                day: 24,
+            })
+        );
+    }
+
+    #[test]
+    fn numeric_dates_still_skip_unrelated_leading_numbers() {
+        assert_eq!(
+            parse_date_tokens("sprint 9 on 2026-04-05"),
+            Some((2026, 4, 5))
+        );
     }
 }

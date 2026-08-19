@@ -396,7 +396,10 @@ Run an optimized benchmark against an isolated store:
 ```bash
 cargo run --release -p memento-research -- benchmark run \
   --dataset /absolute/path/to/benchmark.jsonl \
-  --top-k 10 \
+  --corpus /absolute/path/to/frozen-corpus \
+  --top-k 5 \
+  --warmup 1 \
+  --repetitions 5 \
   --report /tmp/memento-benchmark.json
 ```
 

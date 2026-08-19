@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+pub mod discovery;
 pub mod graph;
 pub mod manifest;
 pub mod sources;
