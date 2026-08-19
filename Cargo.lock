@@ -1302,11 +1302,13 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "memento-ipc",
  "serde",
  "serde_json",
  "tokio",
  "unicode-normalization",
  "walkdir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
