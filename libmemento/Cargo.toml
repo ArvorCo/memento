@@ -15,7 +15,7 @@ categories = ["text-processing", "data-structures"]
 [dependencies]
 # Matrix / linear algebra
 sprs = "0.11"
-nalgebra = { version = "0.33", features = ["serde-serialize"] }
+nalgebra = { version = "0.35", features = ["serde-serialize"] }
 nalgebra-sparse = "0.10"
 lanczos = "0.2"
 
